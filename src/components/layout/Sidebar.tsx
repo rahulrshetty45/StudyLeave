@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { LucideIcon } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
-import { ThemeContext } from '@/contexts/ThemeContext';
+import { useTheme } from '@/context/ThemeContext';
 
 interface SidebarProps {
   activePage?: string;
