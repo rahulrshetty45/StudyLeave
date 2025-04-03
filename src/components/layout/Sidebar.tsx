@@ -678,10 +678,8 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                         <div 
                           key={subtopic.id}
                           style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            ...getNavItemStyle(subtopic.id, 1)
+                            ...getNavItemStyle(subtopic.id, 1),
+                            justifyContent: 'space-between'
                           }}
                         >
                           <Link 
