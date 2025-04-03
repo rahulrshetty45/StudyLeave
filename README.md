@@ -1,6 +1,44 @@
 # StudyLeave
 
-A comprehensive study management application with AI tutoring capabilities.
+A modern study application for organizing notes, flashcards, and tracking progress.
+
+## Features
+
+- Subject organization with notes
+- Flashcards for studying
+- Progress tracking
+- AI Tutor integration
+- Mind maps for visual learning
+
+## Deployment on Vercel
+
+To deploy this project on Vercel:
+
+1. Create a new project on the [Vercel Dashboard](https://vercel.com/new)
+2. Link your GitHub repository (or import the code directly)
+3. Configure the following environment variables:
+   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `MODEL_NAME`: The model to use (e.g., gpt-4o)
+4. Deploy!
+
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+```
+
+Visit [http://localhost:3000](http://localhost:3000) to see the application.
+
+## Built With
+
+- Next.js
+- React
+- OpenAI API
+- Tailwind CSS
 
 ## Getting Started
 
@@ -44,15 +82,6 @@ MODEL_NAME=gpt-4o
 4. Restart the development server if it's already running
 
 > **Important**: Never commit your API keys to version control. The `.env.local` file is included in `.gitignore` by default, but always double-check that your keys are not being exposed.
-
-## Features
-
-- Subject organization with Notion-like nested structure
-- Note-taking with rich text editor
-- AI Tutor powered by GPT-4o for study assistance
-- Quiz and test tracking
-- Progress monitoring
-- Dark mode support
 
 ## Security Best Practices
 
