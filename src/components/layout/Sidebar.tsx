@@ -137,12 +137,14 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
   // Load subjects from localStorage on initial render
   const [subjects, setSubjects] = useState<Topic[]>([]);
   
-  useEffect(() => {
-    // Load saved subjects from localStorage
-    const savedSubjects = localStorage.getItem('subjects');
-    if (savedSubjects) {
-      try {
+  // Function to load subjects from localStorage
+  const loadSubjectsFromStorage = () => {
+    console.log("Loading subjects from localStorage");
+    try {
+      const savedSubjects = localStorage.getItem('subjects');
+      if (savedSubjects) {
         const parsedSubjects = JSON.parse(savedSubjects);
+        console.log("Loaded subjects:", parsedSubjects);
         setSubjects(parsedSubjects);
         
         // Auto-expand active subject
@@ -156,10 +158,28 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
             }));
           }
         }
-      } catch (error) {
-        console.error('Error parsing subjects from localStorage:', error);
       }
+    } catch (error) {
+      console.error('Error parsing subjects from localStorage:', error);
     }
+  };
+  
+  useEffect(() => {
+    // Load saved subjects from localStorage on mount
+    loadSubjectsFromStorage();
+    
+    // Listen for subject changes from other components like AITutor
+    const handleSubjectsChanged = () => {
+      console.log("Subjects changed event received - reloading subjects");
+      loadSubjectsFromStorage();
+    };
+    
+    window.addEventListener('subjectsChanged', handleSubjectsChanged);
+    
+    // Clean up event listener on unmount
+    return () => {
+      window.removeEventListener('subjectsChanged', handleSubjectsChanged);
+    };
   }, [activePage]);
   
   // Save subjects to localStorage whenever they change

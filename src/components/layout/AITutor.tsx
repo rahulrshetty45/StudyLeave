@@ -993,6 +993,50 @@ export default function AITutor() {
     }
   };
 
+  // Check if user is asking to create a new subject
+  const isSubjectCreationRequest = (message: string): { isCreationRequest: boolean, subjectName: string } => {
+    const lowerMsg = message.toLowerCase();
+    
+    // Patterns for creating a new subject - more specific patterns first
+    const creationPatterns = [
+      // Direct patterns with clear subject identification
+      /(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
+      /(?:new|create|make|add)(?:\s+a)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
+      
+      // Simple addition patterns - these should match the user's request for "add physics subject"
+      /add\s+([^"'.?]+?)(?:\s+subject|category|topic)?/i,
+      /add\s+(?:a|an)?(?:\s+new)?(?:\s+subject|category|topic)?\s+([^"'.?]+)/i,
+      
+      // Handle "can you" type questions
+      /can\s+you\s+(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
+      /can\s+you\s+(?:make|create|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+named)?\s+["']?([^"'.?]+)["']?/i,
+      /can\s+you\s+add\s+([^"'.?]+?)(?:\s+subject|category|topic)?/i,
+      
+      // Fallback patterns (less specific)
+      /(?:subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i
+    ];
+    
+    for (const pattern of creationPatterns) {
+      const match = lowerMsg.match(pattern);
+      if (match && match[1]) {
+        // Clean up the extracted subject name
+        let subjectName = match[1].trim();
+        
+        // Remove any trailing "subject" or related words that might have been captured
+        subjectName = subjectName.replace(/\s+(subject|category|topic)$/i, '');
+        
+        console.log("Extracted subject name for creation:", subjectName);
+        
+        return { 
+          isCreationRequest: true, 
+          subjectName: subjectName
+        };
+      }
+    }
+    
+    return { isCreationRequest: false, subjectName: '' };
+  };
+
   // Create a new empty subject
   const createNewSubject = (subjectName: string): string => {
     try {
@@ -1016,13 +1060,29 @@ export default function AITutor() {
       console.log("Formatted subject name:", formattedSubject);
       console.log("Subject ID for URL:", subjectId);
       
-      // Get existing subjects
-      let subjects = JSON.parse(localStorage.getItem('subjects') || '[]');
+      // Get existing subjects - ensure we're getting the latest data
+      let subjects;
+      try {
+        const subjectsJson = localStorage.getItem('subjects');
+        console.log("Raw subjects from localStorage:", subjectsJson);
+        subjects = subjectsJson ? JSON.parse(subjectsJson) : [];
+        
+        // Validate that subjects is an array
+        if (!Array.isArray(subjects)) {
+          console.error("subjects is not an array:", subjects);
+          subjects = [];
+        }
+      } catch (parseError) {
+        console.error("Error parsing subjects from localStorage:", parseError);
+        subjects = [];
+      }
+      
+      console.log("Current subjects in localStorage:", subjects);
       
       // Check if subject already exists
       const subjectExists = subjects.some((s: any) => 
         s.id === subjectId || 
-        s.name.toLowerCase() === formattedSubject.toLowerCase()
+        (s.name && s.name.toLowerCase() === formattedSubject.toLowerCase())
       );
       
       if (subjectExists) {
@@ -1045,9 +1105,27 @@ export default function AITutor() {
       };
       
       subjects.push(newSubject);
+      console.log("Adding new subject to array:", newSubject);
+      console.log("Updated subjects array:", subjects);
       
       // Save updated subjects
-      localStorage.setItem('subjects', JSON.stringify(subjects));
+      try {
+        const subjectsJson = JSON.stringify(subjects);
+        localStorage.setItem('subjects', subjectsJson);
+        console.log("Successfully saved subjects to localStorage:", subjectsJson);
+        
+        // Force a UI update by updating the local subjects state if available
+        if (typeof window !== 'undefined') {
+          // Create and dispatch a custom event that other components might listen for
+          const subjectsChangedEvent = new CustomEvent('subjectsChanged', { 
+            detail: { subjects } 
+          });
+          window.dispatchEvent(subjectsChangedEvent);
+        }
+      } catch (saveError) {
+        console.error("Error saving subjects to localStorage:", saveError);
+        return 'Sorry, there was an error saving the new subject.';
+      }
       
       console.log("Successfully created subject:", newSubject);
       
@@ -1056,45 +1134,6 @@ export default function AITutor() {
       console.error('Error creating new subject:', error);
       return 'Sorry, there was an error creating the new subject.';
     }
-  };
-
-  // Check if user is asking to create a new subject
-  const isSubjectCreationRequest = (message: string): { isCreationRequest: boolean, subjectName: string } => {
-    const lowerMsg = message.toLowerCase();
-    
-    // Patterns for creating a new subject - more specific patterns first
-    const creationPatterns = [
-      // Direct patterns with clear subject identification
-      /(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
-      /(?:new|create|make|add)(?:\s+a)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
-      
-      // Handle "can you" type questions
-      /can\s+you\s+(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
-      /can\s+you\s+(?:make|create)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+named)?\s+["']?([^"'.?]+)["']?/i,
-      
-      // Fallback patterns (less specific)
-      /(?:subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i
-    ];
-    
-    for (const pattern of creationPatterns) {
-      const match = lowerMsg.match(pattern);
-      if (match && match[1]) {
-        // Clean up the extracted subject name
-        let subjectName = match[1].trim();
-        
-        // Remove any trailing "subject" or related words that might have been captured
-        subjectName = subjectName.replace(/\s+(subject|category|topic)$/i, '');
-        
-        console.log("Extracted subject name:", subjectName);
-        
-        return { 
-          isCreationRequest: true, 
-          subjectName: subjectName
-        };
-      }
-    }
-    
-    return { isCreationRequest: false, subjectName: '' };
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -1131,7 +1170,21 @@ export default function AITutor() {
     // If this is a direct subject creation request, create it immediately
     let subjectCreationResult = '';
     if (isCreationRequest && subjectName) {
+      console.log("Subject creation request detected:", { subjectName });
       subjectCreationResult = createNewSubject(subjectName);
+      console.log("Subject creation result:", subjectCreationResult);
+      
+      // Add an immediate response to the chat about the subject creation
+      if (subjectCreationResult.includes("Successfully created")) {
+        const aiMessage = { 
+          id: Date.now(), 
+          text: `I've added the subject "${subjectName}" to your study materials. You can find it in the sidebar under SUBJECTS. Would you like me to generate some notes for it?`, 
+          sender: 'ai' as const 
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        setIsLoading(false);
+        return; // Stop here since we've already handled the message
+      }
     }
 
     try {
