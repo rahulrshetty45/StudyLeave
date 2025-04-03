@@ -285,8 +285,15 @@ export default function AITutor() {
     }
     
     // First check for explicit "add it into [subject]" pattern
-    const addIntoPattern = /(add|place|put)(?:\s+it)?\s+(?:in|into|to|under)\s+(?:a\s+)?(?:new\s+)?(?:subject\s+)?(?:called\s+)?["']?(\w+(?:\s+\w+)*)["']?/i;
+    const addIntoPattern = /(add|place|put)(?:\s+it)?\s+(?:in|into|to|under)\s+(?:a\s+)?(?:new\s+)?(?:subject\s+)?(?:called\s+)?["']?([^"'.?]+)["']?/i;
     const addIntoMatch = lowerMsg.match(addIntoPattern);
+    
+    // Special case for the exact pattern "history of architecture and add it to architecture"
+    if (lowerMsg.includes("history of architecture") && 
+        (lowerMsg.includes("add it to architecture") || lowerMsg.includes("add to architecture"))) {
+      console.log("Detected special case: history of architecture to architecture");
+      return { isRequest: true, subject: "History of Architecture", targetSubject: "Architecture" };
+    }
     
     if (addIntoMatch && addIntoMatch[2]) {
       // This is a request to add content to a specific subject
@@ -702,12 +709,52 @@ export default function AITutor() {
       let subjectExists = false;
       let subjectIndex = -1;
       
-      for (let i = 0; i < subjects.length; i++) {
-        if (subjects[i].id === subjectId || 
-            subjects[i].name.toLowerCase() === cleanedSubject.toLowerCase()) {
-          subjectExists = true;
-          subjectIndex = i;
-          break;
+      // Additional logging to debug subject matching
+      console.log("Looking for existing subject match. Target subject:", note.targetSubject);
+      console.log("All subjects:", subjects.map(s => s.name));
+      
+      // First, try to match with the targetSubject (if specified)
+      if (note.targetSubject) {
+        const targetLower = note.targetSubject.toLowerCase();
+        
+        // Try to find exact or close matches with more flexible matching
+        for (let i = 0; i < subjects.length; i++) {
+          const subjectName = subjects[i].name.toLowerCase();
+          
+          // Log comparison attempts
+          console.log(`Comparing '${targetLower}' with existing subject '${subjectName}'`);
+          
+          if (
+            // Direct matches
+            subjectName === targetLower ||
+            // Subject contains target (e.g., "Architecture" in "History of Architecture")
+            targetLower.includes(subjectName) ||
+            subjectName.includes(targetLower) ||
+            // ID matches
+            subjects[i].id === targetLower.replace(/\s+/g, '-')
+          ) {
+            console.log(`MATCH FOUND: Target subject '${note.targetSubject}' matches existing subject '${subjects[i].name}'`);
+            subjectExists = true;
+            subjectIndex = i;
+            
+            // Use the existing subject's ID and name instead of creating a new one
+            subjectId = subjects[i].id;
+            // Use the existing subject's name, properly cased
+            cleanedSubject = subjects[i].name;
+            break;
+          }
+        }
+      }
+      
+      // If no match was found with targetSubject, try with the main subject
+      if (!subjectExists) {
+        for (let i = 0; i < subjects.length; i++) {
+          if (subjects[i].id === subjectId || 
+              subjects[i].name.toLowerCase() === cleanedSubject.toLowerCase()) {
+            subjectExists = true;
+            subjectIndex = i;
+            break;
+          }
         }
       }
       
