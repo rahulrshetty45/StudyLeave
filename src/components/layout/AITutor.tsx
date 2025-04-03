@@ -1264,7 +1264,8 @@ export default function AITutor() {
           - Include examples and key concepts
           
           ${saveInstruction}
-          Then add "Would you like me to save these notes to your study materials?" at the end.
+          
+          IMPORTANT: Always end your response with this EXACT phrase: "Would you like me to save these notes to your study materials?" This is necessary for the system to recognize your response as notes that can be saved.
           
           Aim for comprehensive but concise notes that cover key concepts and important details.`
         };
@@ -1297,6 +1298,11 @@ export default function AITutor() {
         aiResponse.includes("I've generated") || 
         aiResponse.includes("structured notes") || 
         aiResponse.includes("save these notes") ||
+        aiResponse.includes("add these notes") ||
+        aiResponse.includes("Feel free to add these notes") ||
+        aiResponse.includes("add this to your study materials") ||
+        aiResponse.includes("add this to your notes") ||
+        (aiResponse.includes("notes") && aiResponse.includes("study materials")) ||
         (input.toLowerCase().includes("notes") && input.toLowerCase().includes("make") && aiResponse.length > 500) ||
         aiResponse.length > 800) // If response is very long, it's likely a note
         && aiResponse && !isAsking) { // Don't treat as note generation if they were asking about content
@@ -1306,6 +1312,9 @@ export default function AITutor() {
           includesGenerated: aiResponse.includes("I've generated"),
           includesStructuredNotes: aiResponse.includes("structured notes"),
           includesSaveNotes: aiResponse.includes("save these notes"),
+          includesAddNotes: aiResponse.includes("add these notes"),
+          includesFreeToAdd: aiResponse.includes("Feel free to add these notes"),
+          notesAndStudyMaterials: (aiResponse.includes("notes") && aiResponse.includes("study materials")),
           inputCondition: input.toLowerCase().includes("notes") && input.toLowerCase().includes("make"),
           responseLengthCheck: aiResponse.length > 500,
           responseLength: aiResponse.length
@@ -1622,6 +1631,82 @@ export default function AITutor() {
           >
             <Loader2 size={16} className="animate-spin" />
             Thinking...
+          </div>
+        )}
+        
+        {/* Message indicator that appears below the last message when a note is detected but button might not be showing */}
+        {messages.length > 0 && messages[messages.length - 1].sender === 'ai' && 
+         messages[messages.length - 1].text.includes("notes") &&
+         (messages[messages.length - 1].text.includes("study materials") || messages[messages.length - 1].text.includes("add these notes")) &&
+         !generatedNote && (
+          <div
+            style={{
+              alignSelf: 'center',
+              width: '100%',
+              padding: '12px',
+              backgroundColor: 'rgba(0, 112, 243, 0.1)',
+              borderRadius: '8px',
+              margin: '12px 0',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              border: '1px dashed var(--highlight-color)',
+            }}
+          >
+            <div style={{ fontSize: '14px', marginBottom: '8px', textAlign: 'center' }}>
+              It looks like I've generated notes you might want to save.
+            </div>
+            <button
+              onClick={() => {
+                // Create a note from the last AI message
+                const lastMessage = messages[messages.length - 1];
+                const content = lastMessage.text;
+                
+                // Try to determine subject from content or recent messages
+                let subject = '';
+                for (let i = messages.length - 2; i >= 0; i--) {
+                  if (messages[i].sender === 'user') {
+                    subject = messages[i].text;
+                    break;
+                  }
+                }
+                
+                // Clean subject
+                subject = subject.replace(/^(?:can|could) you (?:make|create|write|generate) (?:me )?(?:some |a )?(notes|summary) (?:about|on|for|regarding) /i, '');
+                
+                if (!subject || subject.length < 3) {
+                  subject = 'Notes';
+                }
+                
+                // Create note object
+                const noteData = {
+                  title: subject.charAt(0).toUpperCase() + subject.slice(1),
+                  content: content,
+                  subject: subject,
+                  targetSubject: undefined
+                };
+                
+                // Set generated note
+                setGeneratedNote(noteData);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: 'var(--highlight-color)',
+                color: 'white',
+                padding: '10px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+              }}
+            >
+              <Save size={16} />
+              Save These Notes
+            </button>
           </div>
         )}
         
