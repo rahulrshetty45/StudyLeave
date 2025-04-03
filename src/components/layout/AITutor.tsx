@@ -481,6 +481,8 @@ export default function AITutor() {
   // Function to save a generated note
   const saveGeneratedNote = (note: NoteContent) => {
     try {
+      console.log("Starting note save process with:", note);
+      
       // Parse subject and target subject for better handling
       const knownSubjects = ['math', 'mathematics', 'chemistry', 'physics', 'biology', 
                          'history', 'geography', 'english', 'literature', 
@@ -530,6 +532,7 @@ export default function AITutor() {
         titleToUse = firstHeadingMatch[1].trim()
           .replace(/:/g, ' - ')
           .replace(/[%?&]/g, ' ');
+        console.log("Using first heading as title:", titleToUse);
       }
       
       // Make sure the title is appropriate and not too generic
@@ -538,11 +541,17 @@ export default function AITutor() {
           titleToUse.toLowerCase() === `${cleanedSubject.toLowerCase()} notes`) {
         // Use a simpler title with just the subject
         titleToUse = cleanedSubject.charAt(0).toUpperCase() + cleanedSubject.slice(1);
+        console.log("Title was too generic, using simplified version:", titleToUse);
       }
       
       // Ensure title isn't too long
       if (titleToUse.length > 50) {
+        const originalTitle = titleToUse;
         titleToUse = titleToUse.substring(0, 47) + '...';
+        console.log("Title was too long, truncated:", {
+          original: originalTitle,
+          truncated: titleToUse
+        });
       }
       
       // Format the title ID - ensure it's URL-safe
@@ -559,7 +568,10 @@ export default function AITutor() {
         subject: cleanedSubject,
         subjectId,
         title: titleToUse,
-        titleId
+        titleId,
+        noteKey,
+        titleKey,
+        blocksKey
       });
       
       // Save the title
@@ -675,47 +687,92 @@ export default function AITutor() {
       localStorage.setItem(blocksKey, JSON.stringify(filteredBlocks));
       
       // Update subjects list if needed
-      let subjects = JSON.parse(localStorage.getItem('subjects') || '[]');
-      
-      // Check if subject exists
-      const subjectExists = subjects.some((s: any) => s.id === subjectId);
-      
-      if (!subjectExists) {
-        // Add new subject with cleaned name
-        subjects.push({
-          id: subjectId,
-          name: cleanedSubject.charAt(0).toUpperCase() + cleanedSubject.slice(1),
-          href: `/subjects/${subjectId}`,
-          subtopics: []
-        });
+      let subjects = [];
+      try {
+        const savedSubjects = localStorage.getItem('subjects');
+        subjects = savedSubjects ? JSON.parse(savedSubjects) : [];
+        console.log("Retrieved existing subjects:", subjects.length);
+      } catch (error) {
+        console.error("Error parsing subjects from localStorage:", error);
+        subjects = [];
       }
       
-      // Check if note exists in subject
-      const subjectIndex = subjects.findIndex((s: any) => s.id === subjectId);
-      if (subjectIndex !== -1) {
-        const noteExists = subjects[subjectIndex].subtopics?.some((n: any) => n.id === titleId);
-        
-        if (!noteExists) {
-          // Add note to subject
-          if (!subjects[subjectIndex].subtopics) {
-            subjects[subjectIndex].subtopics = [];
-          }
-          
-          subjects[subjectIndex].subtopics.push({
-            id: titleId,
-            name: titleToUse,
-            href: `/subjects/${subjectId}/${titleId}`
-          });
+      // Check if the subject already exists
+      let subjectExists = false;
+      let subjectIndex = -1;
+      
+      for (let i = 0; i < subjects.length; i++) {
+        if (subjects[i].id === subjectId || 
+            subjects[i].name.toLowerCase() === cleanedSubject.toLowerCase()) {
+          subjectExists = true;
+          subjectIndex = i;
+          break;
         }
       }
       
-      // Save updated subjects
-      localStorage.setItem('subjects', JSON.stringify(subjects));
+      // Add the note to the subject
+      if (subjectExists) {
+        console.log("Subject exists, adding note to existing subject:", {
+          subjectName: subjects[subjectIndex].name,
+          subjectId: subjects[subjectIndex].id
+        });
+        
+        // Initialize subtopics array if it doesn't exist
+        if (!subjects[subjectIndex].subtopics) {
+          subjects[subjectIndex].subtopics = [];
+        }
+        
+        // Check if the note already exists
+        const noteExists = subjects[subjectIndex].subtopics.some(
+          (note: any) => note.id === titleId
+        );
+        
+        if (!noteExists) {
+          // Add the new note
+          subjects[subjectIndex].subtopics.push({
+            id: titleId,
+            name: titleToUse,
+            href: `/subjects/${subjects[subjectIndex].id}/${titleId}`
+          });
+          
+          console.log("Added new note to existing subject:", {
+            noteTitle: titleToUse,
+            noteId: titleId
+          });
+        } else {
+          console.log("Note already exists in subject, not adding duplicate");
+        }
+      } else {
+        // Create a new subject with this note
+        console.log("Subject doesn't exist, creating new subject:", {
+          subjectName: cleanedSubject,
+          subjectId
+        });
+        
+        const newSubject = {
+          id: subjectId,
+          name: formattedSubject.charAt(0).toUpperCase() + formattedSubject.slice(1),
+          href: `/subjects/${subjectId}`,
+          subtopics: [{
+            id: titleId,
+            name: titleToUse,
+            href: `/subjects/${subjectId}/${titleId}`
+          }]
+        };
+        
+        subjects.push(newSubject);
+        console.log("Created new subject with note:", newSubject);
+      }
       
+      // Save updated subjects back to localStorage
+      localStorage.setItem('subjects', JSON.stringify(subjects));
+      console.log("Saved updated subjects to localStorage");
+      
+      // Return the path to the saved note
       return `/subjects/${subjectId}/${titleId}`;
     } catch (error) {
-      console.error('Error saving generated note:', error);
-      return null;
+      console.error("Error saving generated note:", error);
+      return ''; // Return empty string to indicate failure
     }
   };
 
@@ -993,50 +1050,6 @@ export default function AITutor() {
     }
   };
 
-  // Check if user is asking to create a new subject
-  const isSubjectCreationRequest = (message: string): { isCreationRequest: boolean, subjectName: string } => {
-    const lowerMsg = message.toLowerCase();
-    
-    // Patterns for creating a new subject - more specific patterns first
-    const creationPatterns = [
-      // Direct patterns with clear subject identification
-      /(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
-      /(?:new|create|make|add)(?:\s+a)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
-      
-      // Simple addition patterns - these should match the user's request for "add physics subject"
-      /add\s+([^"'.?]+?)(?:\s+subject|category|topic)?/i,
-      /add\s+(?:a|an)?(?:\s+new)?(?:\s+subject|category|topic)?\s+([^"'.?]+)/i,
-      
-      // Handle "can you" type questions
-      /can\s+you\s+(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
-      /can\s+you\s+(?:make|create|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+named)?\s+["']?([^"'.?]+)["']?/i,
-      /can\s+you\s+add\s+([^"'.?]+?)(?:\s+subject|category|topic)?/i,
-      
-      // Fallback patterns (less specific)
-      /(?:subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i
-    ];
-    
-    for (const pattern of creationPatterns) {
-      const match = lowerMsg.match(pattern);
-      if (match && match[1]) {
-        // Clean up the extracted subject name
-        let subjectName = match[1].trim();
-        
-        // Remove any trailing "subject" or related words that might have been captured
-        subjectName = subjectName.replace(/\s+(subject|category|topic)$/i, '');
-        
-        console.log("Extracted subject name for creation:", subjectName);
-        
-        return { 
-          isCreationRequest: true, 
-          subjectName: subjectName
-        };
-      }
-    }
-    
-    return { isCreationRequest: false, subjectName: '' };
-  };
-
   // Create a new empty subject
   const createNewSubject = (subjectName: string): string => {
     try {
@@ -1060,29 +1073,13 @@ export default function AITutor() {
       console.log("Formatted subject name:", formattedSubject);
       console.log("Subject ID for URL:", subjectId);
       
-      // Get existing subjects - ensure we're getting the latest data
-      let subjects;
-      try {
-        const subjectsJson = localStorage.getItem('subjects');
-        console.log("Raw subjects from localStorage:", subjectsJson);
-        subjects = subjectsJson ? JSON.parse(subjectsJson) : [];
-        
-        // Validate that subjects is an array
-        if (!Array.isArray(subjects)) {
-          console.error("subjects is not an array:", subjects);
-          subjects = [];
-        }
-      } catch (parseError) {
-        console.error("Error parsing subjects from localStorage:", parseError);
-        subjects = [];
-      }
-      
-      console.log("Current subjects in localStorage:", subjects);
+      // Get existing subjects
+      let subjects = JSON.parse(localStorage.getItem('subjects') || '[]');
       
       // Check if subject already exists
       const subjectExists = subjects.some((s: any) => 
         s.id === subjectId || 
-        (s.name && s.name.toLowerCase() === formattedSubject.toLowerCase())
+        s.name.toLowerCase() === formattedSubject.toLowerCase()
       );
       
       if (subjectExists) {
@@ -1105,27 +1102,9 @@ export default function AITutor() {
       };
       
       subjects.push(newSubject);
-      console.log("Adding new subject to array:", newSubject);
-      console.log("Updated subjects array:", subjects);
       
       // Save updated subjects
-      try {
-        const subjectsJson = JSON.stringify(subjects);
-        localStorage.setItem('subjects', subjectsJson);
-        console.log("Successfully saved subjects to localStorage:", subjectsJson);
-        
-        // Force a UI update by updating the local subjects state if available
-        if (typeof window !== 'undefined') {
-          // Create and dispatch a custom event that other components might listen for
-          const subjectsChangedEvent = new CustomEvent('subjectsChanged', { 
-            detail: { subjects } 
-          });
-          window.dispatchEvent(subjectsChangedEvent);
-        }
-      } catch (saveError) {
-        console.error("Error saving subjects to localStorage:", saveError);
-        return 'Sorry, there was an error saving the new subject.';
-      }
+      localStorage.setItem('subjects', JSON.stringify(subjects));
       
       console.log("Successfully created subject:", newSubject);
       
@@ -1134,6 +1113,45 @@ export default function AITutor() {
       console.error('Error creating new subject:', error);
       return 'Sorry, there was an error creating the new subject.';
     }
+  };
+
+  // Check if user is asking to create a new subject
+  const isSubjectCreationRequest = (message: string): { isCreationRequest: boolean, subjectName: string } => {
+    const lowerMsg = message.toLowerCase();
+    
+    // Patterns for creating a new subject - more specific patterns first
+    const creationPatterns = [
+      // Direct patterns with clear subject identification
+      /(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
+      /(?:new|create|make|add)(?:\s+a)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
+      
+      // Handle "can you" type questions
+      /can\s+you\s+(?:create|make|add)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i,
+      /can\s+you\s+(?:make|create)(?:\s+a)?(?:\s+new)?(?:\s+subject|category|topic)(?:\s+named)?\s+["']?([^"'.?]+)["']?/i,
+      
+      // Fallback patterns (less specific)
+      /(?:subject|category|topic)(?:\s+called)?\s+["']?([^"'.?]+)["']?/i
+    ];
+    
+    for (const pattern of creationPatterns) {
+      const match = lowerMsg.match(pattern);
+      if (match && match[1]) {
+        // Clean up the extracted subject name
+        let subjectName = match[1].trim();
+        
+        // Remove any trailing "subject" or related words that might have been captured
+        subjectName = subjectName.replace(/\s+(subject|category|topic)$/i, '');
+        
+        console.log("Extracted subject name:", subjectName);
+        
+        return { 
+          isCreationRequest: true, 
+          subjectName: subjectName
+        };
+      }
+    }
+    
+    return { isCreationRequest: false, subjectName: '' };
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -1170,21 +1188,7 @@ export default function AITutor() {
     // If this is a direct subject creation request, create it immediately
     let subjectCreationResult = '';
     if (isCreationRequest && subjectName) {
-      console.log("Subject creation request detected:", { subjectName });
       subjectCreationResult = createNewSubject(subjectName);
-      console.log("Subject creation result:", subjectCreationResult);
-      
-      // Add an immediate response to the chat about the subject creation
-      if (subjectCreationResult.includes("Successfully created")) {
-        const aiMessage = { 
-          id: Date.now(), 
-          text: `I've added the subject "${subjectName}" to your study materials. You can find it in the sidebar under SUBJECTS. Would you like me to generate some notes for it?`, 
-          sender: 'ai' as const 
-        };
-        setMessages(prev => [...prev, aiMessage]);
-        setIsLoading(false);
-        return; // Stop here since we've already handled the message
-      }
     }
 
     try {
@@ -1293,10 +1297,19 @@ export default function AITutor() {
         aiResponse.includes("I've generated") || 
         aiResponse.includes("structured notes") || 
         aiResponse.includes("save these notes") ||
-        (input.toLowerCase().includes("notes") && input.toLowerCase().includes("make") && aiResponse.length > 500)) 
+        (input.toLowerCase().includes("notes") && input.toLowerCase().includes("make") && aiResponse.length > 500) ||
+        aiResponse.length > 800) // If response is very long, it's likely a note
         && aiResponse && !isAsking) { // Don't treat as note generation if they were asking about content
         
-        console.log("Detected potential note generation");
+        console.log("Detected potential note generation", {
+          isRequest,
+          includesGenerated: aiResponse.includes("I've generated"),
+          includesStructuredNotes: aiResponse.includes("structured notes"),
+          includesSaveNotes: aiResponse.includes("save these notes"),
+          inputCondition: input.toLowerCase().includes("notes") && input.toLowerCase().includes("make"),
+          responseLengthCheck: aiResponse.length > 500,
+          responseLength: aiResponse.length
+        });
 
         // Extract subject if not already detected
         let detectedSubject = subject;
@@ -1312,8 +1325,11 @@ export default function AITutor() {
             if (inputParts.length > 1) {
               detectedSubject = inputParts[0].trim();
             } else {
-              // Fallback to a generic subject
-              detectedSubject = "Notes";
+              // Fallback to a generic subject based on input
+              detectedSubject = input.replace(/make notes|create notes|generate notes|i need notes/gi, '').trim();
+              if (!detectedSubject || detectedSubject.length < 3) {
+                detectedSubject = "Notes";
+              }
             }
           }
         }
@@ -1379,8 +1395,8 @@ export default function AITutor() {
           contentLength: content.length
         });
         
-        // Only set generated note if we have meaningful content
-        if (content.length > 200) {
+        // Always attempt to set a generated note, with a minimum content length
+        if (content.length > 100) {
           // Store the generated note
           const noteData = {
             title,
@@ -1389,8 +1405,19 @@ export default function AITutor() {
             targetSubject
           };
           
+          console.log("Setting generated note:", noteData);
           setGeneratedNote(noteData);
+        } else {
+          console.warn("Content too short to set as a generated note:", content.length);
         }
+      } else {
+        // Clear generated note state if this wasn't a note generation response
+        console.log("Not setting generated note for this response type:", { 
+          isRequest, 
+          isAsking, 
+          responseLength: aiResponse.length 
+        });
+        setGeneratedNote(null);
       }
     } catch (error) {
       console.error('Error generating AI response:', error);
@@ -1603,7 +1630,9 @@ export default function AITutor() {
           <div
             style={{
               alignSelf: 'center',
-              marginTop: '8px',
+              marginTop: '16px',
+              marginBottom: '16px',
+              padding: '0 8px',
               width: '100%',
               display: 'flex',
               justifyContent: 'center',
@@ -1618,16 +1647,26 @@ export default function AITutor() {
                 gap: '8px',
                 backgroundColor: 'var(--highlight-color)',
                 color: 'white',
-                padding: '8px 16px',
+                padding: '12px 20px',
                 borderRadius: '8px',
                 border: 'none',
                 cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '500',
-                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)'
+                fontSize: '15px',
+                fontWeight: '600',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
+                animation: 'pulse 2s infinite',
+                transition: 'transform 0.2s, box-shadow 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.2)';
               }}
             >
-              <Save size={16} />
+              <Save size={18} />
               Save Notes to Study Materials
             </button>
           </div>
