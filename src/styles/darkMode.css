@@ -1,0 +1,49 @@
+/* Dark Mode Styles */
+:root {
+  /* Light mode colors */
+  --bg-primary: #ffffff;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f7f7f7;
+  --text-primary: #333333;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --border-color: #e5e7eb;
+  --highlight-color: #2382de;
+  --highlight-bg: rgba(35, 130, 222, 0.1);
+  --input-bg: #f3f4f6;
+  --hover-bg: #f3f4f6;
+  --box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --code-bg: #f3f4f6;
+  --quote-border: #d1d5db;
+  --todo-checked: #10b981;
+  --todo-unchecked: #9ca3af;
+  --divider-color: #e5e7eb;
+  --modal-overlay: rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme='dark'] {
+  /* Dark mode colors */
+  --bg-primary: #191919;
+  --bg-secondary: #202020;
+  --bg-tertiary: #252525;  /* Slightly lighter black for sidebar and AI tutor */
+  --text-primary: #e6e6e6;
+  --text-secondary: #b8b8b8;
+  --text-tertiary: #8e9297;
+  --border-color: #313131;
+  --highlight-color: #2382de;
+  --highlight-bg: rgba(35, 130, 222, 0.15);
+  --input-bg: #2a2a2a;
+  --hover-bg: #383838;
+  --box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  --code-bg: #292929;
+  --quote-border: #4d4d4d;
+  --todo-checked: #10b981;
+  --todo-unchecked: #9ca3af;
+  --divider-color: #313131;
+  --modal-overlay: rgba(15, 15, 15, 0.8);
+}
+
+/* Smooth transition for theme change */
+body, button, input, div, span, h1, h2, h3, h4, h5, h6, p, a {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+} 

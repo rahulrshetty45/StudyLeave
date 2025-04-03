@@ -1,8 +1,19 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
+  --primary: #0070f3;
+  --secondary: #6c757d;
   --background: #ffffff;
   --foreground: #171717;
+  --sidebar-background: #f7f7f7;
+  --card-background: #ffffff;
+  --border-color: #e5e7eb;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
 }
 
 @theme inline {
@@ -14,13 +25,263 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #121212;
+    --foreground: #e5e7eb;
+    --sidebar-background: #1e1e1e;
+    --card-background: #1e1e1e;
+    --border-color: #2e2e2e;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  min-height: 100vh;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  border-radius: 6px;
+  transition: background-color 0.15s;
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+.sidebar-item:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.dark .sidebar-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-item.active {
+  background-color: rgba(0, 0, 0, 0.05);
+  font-weight: 500;
+}
+
+.dark .sidebar-item.active {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.dashboard-card {
+  background-color: var(--card-background);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 9999px;
+  background-color: #e5e7eb;
+  overflow: hidden;
+}
+
+.dark .progress-bar {
+  background-color: #374151;
+}
+
+.subject-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 24px;
+  background-color: var(--card-background);
+}
+
+.perspective-1000 {
+  perspective: 1200px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(1px);
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Flashcard specific styles */
+.flashcard-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform-style: preserve-3d;
+}
+
+.flashcard-front,
+.flashcard-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: 12px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.flashcard-back {
+  transform: rotateY(180deg);
+}
+
+.flashcard-hover:hover .flashcard-container {
+  transform: rotateY(180deg);
+}
+
+/* Enhanced hover effects */
+.hover-shadow-effect {
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.hover-shadow-effect:hover {
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  transform: translateY(-4px);
+}
+
+/* Math and formatting styles */
+.math-inline {
+  font-family: 'Times New Roman', serif;
+  font-style: italic;
+}
+
+.fraction {
+  display: inline-block;
+  vertical-align: middle;
+  text-align: center;
+  font-family: 'Times New Roman', serif;
+}
+
+/* Scientific notation and mathematical styling */
+.math-symbol {
+  font-family: 'Times New Roman', serif;
+  font-style: italic;
+  display: inline-block;
+  margin: 0 0.05em;
+}
+
+/* Style for numerical values with units */
+.numerical-value {
+  font-family: 'Times New Roman', serif;
+  white-space: nowrap;
+}
+
+/* Enhanced styles for superscripts and subscripts */
+sup, sub {
+  font-size: 0.75em;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+
+sup {
+  top: -0.5em;
+}
+
+sub {
+  bottom: -0.25em;
+}
+
+/* Fix for times symbol in scientific notation */
+.math-symbol.times {
+  font-style: normal;
+  margin: 0 0.25em;
+}
+
+strong, b {
+  font-weight: 600;
+}
+
+em, i {
+  font-style: italic;
+}
+
+/* Additional heading styling for markdown markers */
+h3, h4, h5 {
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+/* Style for ### section markers often used as categories */
+.notion-blocks-container h3:first-child {
+  font-size: 1.2em;
+  color: #6b7280;
+  font-weight: 500;
+  margin-top: 1.5em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Section header styling */
+.section-header {
+  font-size: 1.2em;
+  color: #6b7280;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 1.5em;
+  margin-bottom: 0.75em;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5em;
+}
+
+/* Custom Scrollbar Styling */
+/* For Webkit browsers (Chrome, Safari, etc.) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 2px solid var(--background);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Dark mode scrollbar adjustments */
+@media (prefers-color-scheme: dark) {
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* Firefox scrollbar styling */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  * {
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
 }
