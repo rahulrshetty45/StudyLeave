@@ -28,6 +28,7 @@ export default function AITutor() {
   const [isLoading, setIsLoading] = useState(false);
   const [generatedNote, setGeneratedNote] = useState<NoteContent | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [justSaved, setJustSaved] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const dragHandleRef = useRef<HTMLDivElement>(null);
 
@@ -1442,15 +1443,25 @@ export default function AITutor() {
 
   const handleSaveNote = () => {
     if (generatedNote) {
-      const notePath = saveGeneratedNote(generatedNote);
+      // Create a copy of the note data and immediately clear state to prevent double-saving
+      const noteToSave = {...generatedNote};
+      setGeneratedNote(null);
+      
+      // Set the justSaved flag to prevent fallback from immediately re-triggering
+      setJustSaved(true);
+      
+      // Reset the flag after 2 seconds
+      setTimeout(() => {
+        setJustSaved(false);
+      }, 2000);
+      
+      const notePath = saveGeneratedNote(noteToSave);
       if (notePath) {
         setMessages(prev => [...prev, { 
           id: Date.now(), 
           text: `I've saved the notes to your study materials. You can access them any time from the sidebar.`, 
           sender: 'ai' 
         }]);
-        
-        setGeneratedNote(null);
         
         // Navigate to the saved note
         router.push(notePath);
@@ -1635,10 +1646,14 @@ export default function AITutor() {
         )}
         
         {/* Message indicator that appears below the last message when a note is detected but button might not be showing */}
-        {messages.length > 0 && messages[messages.length - 1].sender === 'ai' && 
-         messages[messages.length - 1].text.includes("notes") &&
-         (messages[messages.length - 1].text.includes("study materials") || messages[messages.length - 1].text.includes("add these notes")) &&
-         !generatedNote && (
+        {messages.length > 0 && 
+          messages[messages.length - 1].sender === 'ai' && 
+          messages[messages.length - 1].text.includes("notes") &&
+          (messages[messages.length - 1].text.includes("study materials") || 
+           messages[messages.length - 1].text.includes("add these notes")) &&
+          !generatedNote && 
+          !justSaved && // Don't show fallback if we just saved
+          !messages[messages.length - 1].text.includes("I've saved the notes to your study materials") && (
           <div
             style={{
               alignSelf: 'center',
