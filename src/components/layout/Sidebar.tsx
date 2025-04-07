@@ -137,6 +137,8 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
   // Load subjects from localStorage on initial render
   const [subjects, setSubjects] = useState<Topic[]>([]);
   
+  const router = useRouter();
+  
   useEffect(() => {
     // Load saved subjects from localStorage
     const savedSubjects = localStorage.getItem('subjects');
@@ -678,11 +680,10 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                         <div 
                           key={subtopic.id}
                           style={{
-                            display: 'flex',
-                            alignItems: 'center',
                             justifyContent: 'space-between',
                             ...getNavItemStyle(subtopic.id, 1)
                           }}
+                          onClick={() => router.push(subtopic.href)}
                         >
                           <Link 
                             href={subtopic.href}
