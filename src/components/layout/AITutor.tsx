@@ -1285,15 +1285,26 @@ export default function AITutor() {
       
       formattedMessages.unshift(systemMessage);
 
+      // Show temporary loading message
+      const loadingId = Date.now();
+      setMessages(prevMsgs => [...prevMsgs, { 
+        id: loadingId, 
+        text: "Thinking...", 
+        sender: 'ai' 
+      }]);
+
       // Generate AI response
       const aiResponse = await generateAIResponse(formattedMessages);
       
-      // Add AI response to messages
-      setMessages(prev => [...prev, { 
-        id: Date.now(), 
-        text: aiResponse || "I'm sorry, I couldn't generate a response.", 
-        sender: 'ai' 
-      }]);
+      // Remove the loading message and add the real response
+      setMessages(prevMsgs => {
+        const filteredMsgs = prevMsgs.filter(m => m.id !== loadingId);
+        return [...filteredMsgs, { 
+          id: Date.now(), 
+          text: aiResponse || "I'm sorry, I couldn't generate a response.", 
+          sender: 'ai' 
+        }];
+      });
       
       // Check if this was a note generation response - more aggressive pattern matching
       if (
@@ -1433,13 +1444,35 @@ export default function AITutor() {
       }
     } catch (error) {
       console.error('Error generating AI response:', error);
-      setMessages(prev => [...prev, { 
-        id: Date.now(), 
-        text: "I'm sorry, I encountered an error. Please try again later.", 
-        sender: 'ai' 
-      }]);
+      
+      // Remove any loading message that might be present
+      setMessages(prev => {
+        const withoutLoading = prev.filter(msg => msg.text !== "Thinking...");
+        return [...withoutLoading, { 
+          id: Date.now(), 
+          text: error instanceof Error 
+            ? `I'm sorry, I encountered an error: ${error.message}` 
+            : "I'm sorry, I encountered an error. Please try again later.", 
+          sender: 'ai' 
+        }];
+      });
+      
+      // For connection errors, display fallback help message instead of technical error
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        setMessages(prev => {
+          const withoutLoading = prev.filter(msg => msg.text !== "Thinking...");
+          return [...withoutLoading, { 
+            id: Date.now(), 
+            text: "I'm having trouble connecting to my knowledge services. This often happens when the API key isn't configured properly. Please check the environment variables in your AWS Amplify deployment to ensure OPENAI_API_KEY and MODEL_NAME are set correctly.", 
+            sender: 'ai' 
+          }];
+        });
+      }
     } finally {
       setIsLoading(false);
+      
+      // Save messages to localStorage for persistence
+      localStorage.setItem('aiTutorMessages', JSON.stringify(messages));
     }
   };
 
