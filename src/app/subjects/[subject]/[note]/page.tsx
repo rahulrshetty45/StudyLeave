@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import AppLayout from '@/components/layout/AppLayout';
+import parse from 'html-react-parser';
 import { 
   ChevronDown, 
   MoreHorizontal, 
@@ -118,13 +119,34 @@ export default function NotePage() {
   const handleBlockChange = (id: string, e: React.FormEvent<HTMLDivElement>) => {
     const content = e.currentTarget.textContent || '';
     
-    // Just update localStorage without triggering any re-renders
-    // This is crucial - we don't want to update React state on every keystroke
-    const currentBlocks = JSON.parse(localStorage.getItem(blocksKey) || '[]');
-    const updatedBlocks = currentBlocks.map((block: Block) => 
+    // Only update localStorage directly without triggering re-renders
+    // Find the block in the current state
+    const currentBlock = blocks.find(block => block.id === id);
+    if (!currentBlock) return;
+    
+    // Update only localStorage
+    const localStorageBlocks = JSON.parse(localStorage.getItem(blocksKey) || '[]');
+    const updatedLocalStorageBlocks = localStorageBlocks.map((block: Block) => 
       block.id === id ? { ...block, content } : block
     );
-    localStorage.setItem(blocksKey, JSON.stringify(updatedBlocks));
+    localStorage.setItem(blocksKey, JSON.stringify(updatedLocalStorageBlocks));
+    
+    // Do NOT update React state during typing - this would reset cursor position
+  };
+  
+  // Only update React state when a block loses focus to keep state eventually consistent
+  const handleBlockBlur = (id: string, e: React.FocusEvent<HTMLDivElement>) => {
+    const content = e.currentTarget.textContent || '';
+    
+    // Now update React state after user has finished typing
+    setBlocks(prevBlocks => 
+      prevBlocks.map(block => 
+        block.id === id ? { ...block, content } : block
+      )
+    );
+    
+    setIsTyping(false);
+    setActiveBlock(null);
   };
   
   // Handle focus events
@@ -133,9 +155,8 @@ export default function NotePage() {
     setActiveBlock(blockId);
   };
   
-  const handleBlur = () => {
-    setIsTyping(false);
-    setActiveBlock(null);
+  const handleBlur = (id: string, e: React.FocusEvent<HTMLDivElement>) => {
+    handleBlockBlur(id, e);
   };
   
   // Create a new block after the current one
@@ -182,13 +203,214 @@ export default function NotePage() {
     // Enter key - create new block
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      createNewBlock(id);
+      
+      // Get the current block's content
+      const currentBlock = blocks.find(block => block.id === id);
+      if (!currentBlock) return;
+      
+      // Get the selection to determine where to split the text
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) return;
+      
+      const range = selection.getRangeAt(0);
+      const blockElement = e.currentTarget;
+      
+      // Get text before and after cursor
+      let textBefore = '';
+      let textAfter = '';
+      
+      if (range.commonAncestorContainer === blockElement) {
+        // If selection is directly in the div
+        if (blockElement.childNodes.length > 0) {
+          const childNodes = Array.from(blockElement.childNodes);
+          let beforeCursor = true;
+          
+          for (const node of childNodes) {
+            if (node === range.startContainer || node.contains(range.startContainer)) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                const nodeText = node.textContent || '';
+                textBefore += nodeText.substring(0, range.startOffset);
+                textAfter += nodeText.substring(range.startOffset);
+                beforeCursor = false;
+              } else {
+                // Handle other node types
+                beforeCursor = false;
+                textAfter += node.textContent || '';
+              }
+            } else if (beforeCursor) {
+              textBefore += node.textContent || '';
+            } else {
+              textAfter += node.textContent || '';
+            }
+          }
+        }
+      } else {
+        // If selection is in a child node
+        const startNode = range.startContainer;
+        
+        if (startNode.nodeType === Node.TEXT_NODE) {
+          // Split text at cursor position
+          const text = startNode.textContent || '';
+          textBefore = text.substring(0, range.startOffset);
+          textAfter = text.substring(range.startOffset);
+          
+          // Add text from nodes before the current node
+          let currentNode = startNode.previousSibling;
+          while (currentNode) {
+            textBefore = (currentNode.textContent || '') + textBefore;
+            currentNode = currentNode.previousSibling;
+          }
+          
+          // Add text from nodes after the current node
+          currentNode = startNode.nextSibling;
+          while (currentNode) {
+            textAfter += currentNode.textContent || '';
+            currentNode = currentNode.nextSibling;
+          }
+        }
+      }
+      
+      // Update current block with text before cursor
+      const updatedBlocks = blocks.map(block => 
+        block.id === id ? { ...block, content: textBefore.trim() } : block
+      );
+      
+      // Create a new block with text after cursor
+      const newBlock = {
+        id: generateId(),
+        type: currentBlock.type, // Keep the same block type
+        content: textAfter.trim(),
+        checked: currentBlock.type === 'todo' ? false : undefined // Reset checked state for todos
+      };
+      
+      // Find the index of the current block
+      const index = blocks.findIndex(block => block.id === id);
+      
+      // Insert the new block after the current one
+      updatedBlocks.splice(index + 1, 0, newBlock);
+      
+      // Update blocks state
+      setBlocks(updatedBlocks);
+      localStorage.setItem(blocksKey, JSON.stringify(updatedBlocks));
+      
+      // Focus the new block after render
+      setTimeout(() => {
+        const el = blockRefs.current[newBlock.id];
+        if (el) {
+          el.focus();
+          // Place cursor at beginning of new block
+          const selection = window.getSelection();
+          if (selection) {
+            const range = document.createRange();
+            range.setStart(el, 0);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        }
+      }, 10);
     }
     
-    // Backspace on empty block - delete it (unless it's the only block)
-    if (e.key === 'Backspace' && blocks.length > 1) {
-      const currentBlock = blocks.find(block => block.id === id);
-      if (currentBlock && currentBlock.content === '') {
+    // Backspace key handling
+    if (e.key === 'Backspace') {
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) return;
+      
+      const range = selection.getRangeAt(0);
+      
+      // Check if cursor is at the beginning of the block
+      const isAtStart = isCursorAtStart(selection);
+      
+      // If cursor is at beginning of block (not empty) and there's a previous block, merge with previous
+      if (isAtStart && blocks.length > 1) {
+        const currentBlockIndex = blocks.findIndex(block => block.id === id);
+        
+        // Only proceed if this isn't the first block
+        if (currentBlockIndex > 0) {
+          e.preventDefault();
+          
+          // Get the previous block
+          const previousBlock = blocks[currentBlockIndex - 1];
+          const currentBlock = blocks[currentBlockIndex];
+          
+          // Create new blocks array with merged content
+          const updatedBlocks = [...blocks];
+          
+          // Merge the content - append current block's content to previous block
+          updatedBlocks[currentBlockIndex - 1] = {
+            ...previousBlock,
+            content: previousBlock.content + (previousBlock.content && currentBlock.content ? ' ' : '') + currentBlock.content
+          };
+          
+          // Remove the current block
+          updatedBlocks.splice(currentBlockIndex, 1);
+          
+          // Update state
+          setBlocks(updatedBlocks);
+          localStorage.setItem(blocksKey, JSON.stringify(updatedBlocks));
+          
+          // Set cursor at the merge point in previous block
+          setTimeout(() => {
+            const previousBlockEl = blockRefs.current[previousBlock.id];
+            if (previousBlockEl) {
+              previousBlockEl.focus();
+              
+              // Try to set cursor at merge point (end of previous block's original content)
+              const selection = window.getSelection();
+              if (selection) {
+                // Get text nodes within the previous block element
+                let textNode: Node | null = null;
+                let offset = previousBlock.content.length;
+                
+                if (previousBlockEl.childNodes.length > 0) {
+                  let currentLength = 0;
+                  // Find the text node where our merge point falls
+                  for (let i = 0; i < previousBlockEl.childNodes.length; i++) {
+                    const node = previousBlockEl.childNodes[i];
+                    const nodeLength = node.textContent?.length || 0;
+                    
+                    if (currentLength + nodeLength >= offset) {
+                      textNode = node;
+                      offset = offset - currentLength;
+                      break;
+                    }
+                    
+                    currentLength += nodeLength;
+                  }
+                  
+                  // If we found the right text node, set cursor there
+                  if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+                    const range = document.createRange();
+                    range.setStart(textNode, offset);
+                    range.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                  } else {
+                    // Fallback: set cursor at end of element
+                    const range = document.createRange();
+                    range.selectNodeContents(previousBlockEl);
+                    range.collapse(false);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                  }
+                } else {
+                  // If no child nodes, just set cursor at beginning
+                  const range = document.createRange();
+                  range.setStart(previousBlockEl, 0);
+                  range.collapse(true);
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+                }
+              }
+            }
+          }, 10);
+          
+          return;
+        }
+      }
+      
+      // Original empty block deletion behavior
+      if (e.currentTarget.textContent === '' && blocks.length > 1) {
         e.preventDefault();
         deleteBlock(id);
       }
@@ -199,6 +421,27 @@ export default function NotePage() {
       e.preventDefault();
       showBlockMenuAtBlock(id);
     }
+  };
+  
+  // Helper function to check if cursor is at the start of a block
+  const isCursorAtStart = (selection: Selection): boolean => {
+    if (!selection.rangeCount) return false;
+    
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed) return false; // Not a cursor, but a selection
+    
+    // Check if we're at position 0 of a text node
+    if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset === 0) {
+      // Check if there are no previous siblings
+      return !range.startContainer.previousSibling;
+    }
+    
+    // Check if we're at the start of an element
+    if (range.startContainer.nodeType === Node.ELEMENT_NODE && range.startOffset === 0) {
+      return true;
+    }
+    
+    return false;
   };
   
   // Delete a block
@@ -341,11 +584,12 @@ export default function NotePage() {
               }}
               onInput={(e) => handleBlockChange(block.id, e)}
               onFocus={() => handleFocus(block.id)}
-              onBlur={handleBlur}
+              onBlur={(e) => handleBlur(block.id, e)}
               onKeyDown={(e) => handleKeyDown(block.id, e)}
               data-placeholder={block.content ? '' : placeholderText}
-              dangerouslySetInnerHTML={{ __html: block.content }}
-            />
+            >
+              {block.content || ''}
+            </div>
           </div>
         );
         break;
@@ -379,11 +623,12 @@ export default function NotePage() {
               }}
               onInput={(e) => handleBlockChange(block.id, e)}
               onFocus={() => handleFocus(block.id)}
-              onBlur={handleBlur}
+              onBlur={(e) => handleBlur(block.id, e)}
               onKeyDown={(e) => handleKeyDown(block.id, e)}
               data-placeholder={block.content ? '' : placeholderText}
-              dangerouslySetInnerHTML={{ __html: block.content }}
-            />
+            >
+              {block.content || ''}
+            </div>
           </div>
         );
         break;
@@ -430,11 +675,12 @@ export default function NotePage() {
               }}
               onInput={(e) => handleBlockChange(block.id, e)}
               onFocus={() => handleFocus(block.id)}
-              onBlur={handleBlur}
+              onBlur={(e) => handleBlur(block.id, e)}
               onKeyDown={(e) => handleKeyDown(block.id, e)}
               data-placeholder={block.content ? '' : placeholderText}
-              dangerouslySetInnerHTML={{ __html: block.content }}
-            />
+            >
+              {block.content || ''}
+            </div>
           </div>
         );
         break;
@@ -476,7 +722,7 @@ export default function NotePage() {
         break;
         
       default: // paragraph
-        placeholderText = 'Type "/" for commands';
+        placeholderText = '';
         break;
     }
     
@@ -484,7 +730,7 @@ export default function NotePage() {
     if (blockElement) {
       return (
         <div style={{ position: 'relative', marginBottom: '4px' }}>
-          {isActive && (
+          {activeBlock === block.id && (
             <div
               onClick={() => showBlockMenuAtBlock(block.id)}
               style={{
@@ -522,7 +768,7 @@ export default function NotePage() {
     // Default block rendering
     return (
       <div style={{ position: 'relative', marginBottom: '4px' }}>
-        {isActive && (
+        {activeBlock === block.id && (
           <div
             onClick={() => showBlockMenuAtBlock(block.id)}
             style={{
@@ -563,11 +809,12 @@ export default function NotePage() {
           style={blockStyle}
           onInput={(e) => handleBlockChange(block.id, e)}
           onFocus={() => handleFocus(block.id)}
-          onBlur={handleBlur}
+          onBlur={(e) => handleBlur(block.id, e)}
           onKeyDown={(e) => handleKeyDown(block.id, e)}
           data-placeholder={block.content ? '' : placeholderText}
-          dangerouslySetInnerHTML={{ __html: block.content }}
-        />
+        >
+          {block.content || ''}
+        </div>
       </div>
     );
   };
@@ -621,11 +868,84 @@ export default function NotePage() {
           lineHeight: 1.6,
           color: 'var(--text-primary)',
         }}>
-          {blocks.map(block => (
-            <div key={block.id}>
-              {renderBlock(block)}
-            </div>
-          ))}
+          {blocks.map(block => {
+            // If this block appears to contain HTML content and is not being edited
+            const containsHtml = block.content && 
+              (block.content.includes('<h') || 
+               block.content.includes('<strong>') ||
+               block.content.includes('<em>') ||
+               block.content.includes('<ul>') ||
+               block.content.includes('<ol>') ||
+               block.content.includes('<li>') ||
+               block.content.includes('<p>'));
+            
+            const isBeingEdited = activeBlock === block.id;
+            
+            // If it contains HTML and is not being edited, render parsed content
+            if (containsHtml && !isBeingEdited) {
+              return (
+                <div 
+                  key={block.id}
+                  className="formatted-content" 
+                  style={{ 
+                    position: 'relative',
+                    marginBottom: '16px'
+                  }}
+                  onClick={() => {
+                    // Make the block editable on click
+                    setActiveBlock(block.id);
+                    setTimeout(() => {
+                      const el = blockRefs.current[block.id];
+                      if (el) el.focus();
+                    }, 0);
+                  }}
+                >
+                  {activeBlock === block.id && (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        showBlockMenuAtBlock(block.id);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        left: '-30px',
+                        top: '4px',
+                        width: '24px',
+                        height: '24px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        opacity: 0.5,
+                        transition: 'opacity 0.1s',
+                        borderRadius: '3px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1';
+                        e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = '0.5';
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <Plus size={16} />
+                    </div>
+                  )}
+                  <div className="content-viewer">
+                    {parse(block.content)}
+                  </div>
+                </div>
+              );
+            }
+            
+            // Otherwise use the regular block renderer
+            return (
+              <div key={block.id}>
+                {renderBlock(block)}
+              </div>
+            );
+          })}
         </div>
         
         {/* Block Menu */}
@@ -700,12 +1020,81 @@ export default function NotePage() {
         </div>
       </div>
       
-      {/* Global CSS for placeholders */}
+      {/* Global CSS for placeholders and formatted content */}
       <style jsx global>{`
         [contenteditable]:empty:before {
           content: attr(data-placeholder);
           color: #9CA3AF;
           cursor: text;
+        }
+        
+        .formatted-content {
+          cursor: text;
+        }
+        
+        .formatted-content .content-viewer {
+          padding: 4px 0;
+        }
+        
+        .formatted-content .content-viewer h1 {
+          font-size: 30px;
+          font-weight: 700;
+          margin-top: 24px;
+          margin-bottom: 16px;
+        }
+        
+        .formatted-content .content-viewer h2 {
+          font-size: 24px;
+          font-weight: 600;
+          margin-top: 20px;
+          margin-bottom: 12px;
+        }
+        
+        .formatted-content .content-viewer h3 {
+          font-size: 20px;
+          font-weight: 600;
+          margin-top: 16px;
+          margin-bottom: 8px;
+        }
+        
+        .formatted-content .content-viewer p {
+          margin: 8px 0;
+        }
+        
+        .formatted-content .content-viewer ul,
+        .formatted-content .content-viewer ol {
+          padding-left: 24px;
+          margin: 8px 0;
+        }
+        
+        .formatted-content .content-viewer li {
+          margin: 4px 0;
+        }
+        
+        .formatted-content .content-viewer blockquote {
+          border-left: 3px solid var(--quote-border, #e5e7eb);
+          padding-left: 16px;
+          font-style: italic;
+          color: var(--text-secondary, #6b7280);
+          margin: 16px 0;
+        }
+        
+        .formatted-content .content-viewer pre {
+          font-family: monospace;
+          background-color: var(--code-bg, #f3f4f6);
+          padding: 12px 16px;
+          border-radius: 6px;
+          white-space: pre-wrap;
+          margin: 12px 0;
+          overflow-x: auto;
+        }
+        
+        .formatted-content .content-viewer code {
+          font-family: monospace;
+          background-color: var(--code-bg, #f3f4f6);
+          padding: 2px 4px;
+          border-radius: 4px;
+          font-size: 0.9em;
         }
       `}</style>
     </AppLayout>

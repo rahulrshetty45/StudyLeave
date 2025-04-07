@@ -5,6 +5,8 @@ import { PaperAirplaneIcon } from '@heroicons/react/24/outline';
 import { X, GripVertical, Loader2, Save } from 'lucide-react';
 import { generateAIResponse } from '@/lib/openai';
 import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   id: number;
@@ -285,15 +287,8 @@ export default function AITutor() {
     }
     
     // First check for explicit "add it into [subject]" pattern
-    const addIntoPattern = /(add|place|put)(?:\s+it)?\s+(?:in|into|to|under)\s+(?:a\s+)?(?:new\s+)?(?:subject\s+)?(?:called\s+)?["']?([^"'.?]+)["']?/i;
+    const addIntoPattern = /(add|place|put)(?:\s+it)?\s+(?:in|into|to|under)\s+(?:a\s+)?(?:new\s+)?(?:subject\s+)?(?:called\s+)?["']?(\w+(?:\s+\w+)*)["']?/i;
     const addIntoMatch = lowerMsg.match(addIntoPattern);
-    
-    // Special case for the exact pattern "history of architecture and add it to architecture"
-    if (lowerMsg.includes("history of architecture") && 
-        (lowerMsg.includes("add it to architecture") || lowerMsg.includes("add to architecture"))) {
-      console.log("Detected special case: history of architecture to architecture");
-      return { isRequest: true, subject: "History of Architecture", targetSubject: "Architecture" };
-    }
     
     if (addIntoMatch && addIntoMatch[2]) {
       // This is a request to add content to a specific subject
@@ -709,52 +704,12 @@ export default function AITutor() {
       let subjectExists = false;
       let subjectIndex = -1;
       
-      // Additional logging to debug subject matching
-      console.log("Looking for existing subject match. Target subject:", note.targetSubject);
-      console.log("All subjects:", subjects.map(s => s.name));
-      
-      // First, try to match with the targetSubject (if specified)
-      if (note.targetSubject) {
-        const targetLower = note.targetSubject.toLowerCase();
-        
-        // Try to find exact or close matches with more flexible matching
-        for (let i = 0; i < subjects.length; i++) {
-          const subjectName = subjects[i].name.toLowerCase();
-          
-          // Log comparison attempts
-          console.log(`Comparing '${targetLower}' with existing subject '${subjectName}'`);
-          
-          if (
-            // Direct matches
-            subjectName === targetLower ||
-            // Subject contains target (e.g., "Architecture" in "History of Architecture")
-            targetLower.includes(subjectName) ||
-            subjectName.includes(targetLower) ||
-            // ID matches
-            subjects[i].id === targetLower.replace(/\s+/g, '-')
-          ) {
-            console.log(`MATCH FOUND: Target subject '${note.targetSubject}' matches existing subject '${subjects[i].name}'`);
-            subjectExists = true;
-            subjectIndex = i;
-            
-            // Use the existing subject's ID and name instead of creating a new one
-            subjectId = subjects[i].id;
-            // Use the existing subject's name, properly cased
-            cleanedSubject = subjects[i].name;
-            break;
-          }
-        }
-      }
-      
-      // If no match was found with targetSubject, try with the main subject
-      if (!subjectExists) {
-        for (let i = 0; i < subjects.length; i++) {
-          if (subjects[i].id === subjectId || 
-              subjects[i].name.toLowerCase() === cleanedSubject.toLowerCase()) {
-            subjectExists = true;
-            subjectIndex = i;
-            break;
-          }
+      for (let i = 0; i < subjects.length; i++) {
+        if (subjects[i].id === subjectId || 
+            subjects[i].name.toLowerCase() === cleanedSubject.toLowerCase()) {
+          subjectExists = true;
+          subjectIndex = i;
+          break;
         }
       }
       
@@ -1671,7 +1626,35 @@ export default function AITutor() {
               wordBreak: 'break-word'
             }}
           >
-            {message.text}
+            {message.sender === 'ai' ? (
+              <div className="markdown-content">
+                <ReactMarkdown 
+                  remarkPlugins={[remarkGfm]} 
+                  components={{
+                    h1: ({children}) => <h1 style={{fontSize: '1.5em', fontWeight: 'bold', margin: '16px 0 8px 0'}}>{children}</h1>,
+                    h2: ({children}) => <h2 style={{fontSize: '1.3em', fontWeight: 'bold', margin: '14px 0 8px 0'}}>{children}</h2>,
+                    h3: ({children}) => <h3 style={{fontSize: '1.1em', fontWeight: 'bold', margin: '12px 0 8px 0'}}>{children}</h3>,
+                    h4: ({children}) => <h4 style={{fontSize: '1em', fontWeight: 'bold', margin: '10px 0 8px 0'}}>{children}</h4>,
+                    p: ({children}) => <p style={{margin: '8px 0'}}>{children}</p>,
+                    ul: ({children}) => <ul style={{paddingLeft: '20px', margin: '8px 0'}}>{children}</ul>,
+                    ol: ({children}) => <ol style={{paddingLeft: '20px', margin: '8px 0'}}>{children}</ol>,
+                    li: ({children}) => <li style={{margin: '4px 0'}}>{children}</li>,
+                    blockquote: ({children}) => <blockquote style={{borderLeft: '4px solid var(--border-color)', paddingLeft: '16px', margin: '16px 0'}}>{children}</blockquote>,
+                    code: ({node, className, children, ...props}) => {
+                      const match = /language-(\w+)/.exec(className || '');
+                      const isInline = !match && !className;
+                      return isInline 
+                        ? <code style={{backgroundColor: 'var(--code-bg)', padding: '2px 4px', borderRadius: '4px'}} {...props}>{children}</code>
+                        : <pre style={{backgroundColor: 'var(--code-bg)', padding: '12px', borderRadius: '8px', overflowX: 'auto'}}><code {...props}>{children}</code></pre>
+                    }
+                  }}
+                >
+                  {message.text}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              message.text
+            )}
           </div>
         ))}
         {isLoading && (

@@ -4,8 +4,10 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import AITutor from './AITutor';
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, LogOut } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
+import { useRouter } from 'next/navigation';
+import Cookies from 'js-cookie';
 import '@/styles/darkMode.css';
 
 interface AppLayoutProps {
@@ -15,6 +17,7 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children, activePage = 'dashboard' }: AppLayoutProps) {
   const { theme, toggleTheme } = useTheme();
+  const router = useRouter();
   const isDarkMode = theme === 'dark';
   const [aiTutorWidth, setAiTutorWidth] = useState(320);
   const [aiTutorExpanded, setAiTutorExpanded] = useState(true);
@@ -54,6 +57,19 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
       clearInterval(interval);
     };
   }, [aiTutorWidth]);
+
+  // Handle logout function
+  const handleLogout = () => {
+    // Clear authentication data
+    localStorage.removeItem('authenticated');
+    localStorage.removeItem('user');
+    
+    // Clear cookies
+    Cookies.remove('authenticated');
+    
+    // Redirect to login page
+    router.push('/login');
+  };
 
   return (
     <div style={{
@@ -171,6 +187,27 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
               title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
             >
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            
+            {/* Logout Button */}
+            <button
+              onClick={handleLogout}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                backgroundColor: 'var(--input-bg)',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-primary)'
+              }}
+              aria-label="Logout"
+              title="Logout"
+            >
+              <LogOut size={18} />
             </button>
             
             <div style={{
