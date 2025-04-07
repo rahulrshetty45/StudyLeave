@@ -10,6 +10,23 @@ A modern study application for organizing notes, flashcards, and tracking progre
 - AI Tutor integration
 - Mind maps for visual learning
 
+## Deployment on AWS Amplify
+
+To deploy this project on AWS Amplify with a custom domain:
+
+1. Log in to the [AWS Management Console](https://aws.amazon.com/console/)
+2. Search for "Amplify" and navigate to the service
+3. Click "New app" > "Host web app"
+4. Connect to your GitHub repository and select the main branch
+5. Configure build settings (use the provided amplify.yml)
+6. Set the following environment variables:
+   - `OPENAI_API_KEY`: Your OpenAI API key
+   - `MODEL_NAME`: The model to use (e.g., gpt-4o)
+7. Deploy the application
+8. Set up your custom domain through the "Domain Management" section
+9. Add the required DNS records at your domain registrar
+10. Wait for DNS propagation (can take 24-48 hours)
+
 ## Deployment on Vercel
 
 To deploy this project on Vercel:
