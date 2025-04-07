@@ -15,6 +15,23 @@ const openai = new OpenAI({
   apiKey: openaiApiKey || '',  // Provide empty string as fallback to prevent undefined error
 });
 
+// Helper function to add CORS headers
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+}
+
+// Handle OPTIONS request for CORS preflight
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 200,
+    headers: corsHeaders(),
+  });
+}
+
 export async function POST(request: Request) {
   try {
     // Get messages from request body
@@ -30,14 +47,14 @@ export async function POST(request: Request) {
     if (!openaiApiKey) {
       return NextResponse.json(
         { error: 'OpenAI API key is not configured' },
-        { status: 500 }
+        { status: 500, headers: corsHeaders() }
       );
     }
 
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json(
         { error: 'Invalid request body. Messages array is required.' },
-        { status: 400 }
+        { status: 400, headers: corsHeaders() }
       );
     }
 
@@ -68,24 +85,39 @@ export async function POST(request: Request) {
       completionTokens: response.usage?.completion_tokens
     });
 
-    // Return response
+    // Return response with CORS headers
     return NextResponse.json({
       message: response.choices[0].message.content,
-    });
+    }, { headers: corsHeaders() });
   } catch (error: any) {
-    console.error('Error generating AI response:', error?.message || error);
+    console.error('Error generating AI response:', error);
+    
+    // Detailed error logging for debugging
+    console.error('Error details:', {
+      name: error?.name,
+      message: error?.message,
+      status: error?.status,
+      code: error?.code,
+      type: error?.type,
+    });
     
     // Check for specific OpenAI errors
     if (error?.message?.includes('API key')) {
       return NextResponse.json(
         { error: 'Authentication error with OpenAI API' },
-        { status: 401 }
+        { status: 401, headers: corsHeaders() }
       );
     }
     
+    // Return more detailed error for debugging
     return NextResponse.json(
-      { error: 'Error generating AI response: ' + (error?.message || 'Unknown error') },
-      { status: 500 }
+      { 
+        error: 'Error generating AI response', 
+        message: error?.message || 'Unknown error',
+        type: error?.type || 'Unknown type',
+        status: error?.status || 500,
+      },
+      { status: 500, headers: corsHeaders() }
     );
   }
 } 
