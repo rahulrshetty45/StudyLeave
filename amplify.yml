@@ -6,6 +6,9 @@ frontend:
         - npm ci
     build:
       commands:
+        # Make sure environment variables are available during build
+        - echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> .env.production
+        - echo "MODEL_NAME=$MODEL_NAME" >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next
