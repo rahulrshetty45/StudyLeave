@@ -840,8 +840,8 @@ export default function NotePage() {
       const formattedSubjectName = subject.split('-').map(word => 
         word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       
-      const formattedNoteName = note.split('-').map(word => 
-        word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+      // Use the current title from state instead of parsing from URL
+      const formattedNoteName = title;
       
       // Create a system message that instructs the AI to generate structured notes
       const systemMessage: Message = {
