@@ -125,6 +125,32 @@ export default function NotePage() {
     // Now update React state after user has finished typing
     setTitle(newTitle);
     setIsTyping(false);
+    
+    // Update the title in the sidebar
+    const savedSubjects = localStorage.getItem('subjects');
+    if (savedSubjects) {
+      try {
+        const parsedSubjects = JSON.parse(savedSubjects);
+        const updatedSubjects = parsedSubjects.map((subj: any) => {
+          if (subj.id === subject) {
+            const updatedSubtopics = (subj.subtopics || []).map((subtopic: any) => {
+              // Match the current note by its URL slug
+              if (subtopic.href.endsWith(`/${note}`)) {
+                return { ...subtopic, name: newTitle };
+              }
+              return subtopic;
+            });
+            return { ...subj, subtopics: updatedSubtopics };
+          }
+          return subj;
+        });
+        
+        // Save the updated subjects back to localStorage
+        localStorage.setItem('subjects', JSON.stringify(updatedSubjects));
+      } catch (error) {
+        console.error('Error updating note title in sidebar:', error);
+      }
+    }
   };
   
   // Handle block content changes
