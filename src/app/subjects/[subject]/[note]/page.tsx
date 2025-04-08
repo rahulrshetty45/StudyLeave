@@ -108,11 +108,20 @@ export default function NotePage() {
     return Math.random().toString(36).substr(2, 9);
   };
   
-  // Handle title changes
+  // Handle title changes - only update localStorage during typing, not React state
   const handleTitleChange = (e: React.FormEvent<HTMLHeadingElement>) => {
     const newTitle = e.currentTarget.textContent || '';
-    setTitle(newTitle);
+    // Only update localStorage, not React state (to avoid cursor position reset)
     localStorage.setItem(titleKey, newTitle);
+    // Do NOT update React state during typing - this would reset cursor position
+  };
+
+  // Add a title blur handler to update state only after typing is finished
+  const handleTitleBlur = (e: React.FocusEvent<HTMLHeadingElement>) => {
+    const newTitle = e.currentTarget.textContent || '';
+    // Now update React state after user has finished typing
+    setTitle(newTitle);
+    setIsTyping(false);
   };
   
   // Handle block content changes
@@ -856,7 +865,7 @@ export default function NotePage() {
           }}
           onInput={handleTitleChange}
           onFocus={() => setIsTyping(true)}
-          onBlur={() => setIsTyping(false)}
+          onBlur={handleTitleBlur}
         >
           {title}
         </h1>

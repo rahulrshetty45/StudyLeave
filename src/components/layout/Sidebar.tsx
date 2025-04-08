@@ -138,8 +138,42 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
   const [subjects, setSubjects] = useState<Topic[]>([]);
   
   const router = useRouter();
+  const pathname = usePathname();
+  const [isMounted, setIsMounted] = useState(false);
+  
+  // Set isMounted to true after component mounts to safely use browser-only code
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+  
+  // Add event listener to close dropdowns when clicking outside
+  useEffect(() => {
+    if (!isMounted) return;
+    
+    const closeDropdowns = (e: MouseEvent) => {
+      // Close all dropdown menus
+      const dropdowns = document.querySelectorAll('.subject-menu > div, .note-menu > div');
+      dropdowns.forEach((dropdown: Element) => {
+        if (dropdown instanceof HTMLElement && dropdown.style.display === 'block') {
+          // Check if the click was outside the dropdown
+          if (!dropdown.contains(e.target as Node) && 
+              !(e.target instanceof HTMLElement && e.target.closest('.subject-menu button, .note-menu button'))) {
+            dropdown.style.display = 'none';
+          }
+        }
+      });
+    };
+    
+    document.addEventListener('click', closeDropdowns);
+    
+    return () => {
+      document.removeEventListener('click', closeDropdowns);
+    };
+  }, [isMounted]);
   
   useEffect(() => {
+    if (!isMounted) return; // Only run on client-side
+    
     // Load saved subjects from localStorage
     const savedSubjects = localStorage.getItem('subjects');
     if (savedSubjects) {
@@ -147,10 +181,10 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
         const parsedSubjects = JSON.parse(savedSubjects);
         setSubjects(parsedSubjects);
         
-        // Auto-expand active subject
-        if (activePage === 'subjects' && window.location.pathname.includes('/subjects/')) {
-          const pathParts = window.location.pathname.split('/');
-          if (pathParts.length > 2) {
+        // Auto-expand subjects based on current path
+        if (pathname && pathname.includes('/subjects/')) {
+          const pathParts = pathname.split('/');
+          if (pathParts.length >= 3) {
             const subjectId = pathParts[2];
             setExpandedSubjects(prev => ({
               ...prev,
@@ -162,14 +196,16 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
         console.error('Error parsing subjects from localStorage:', error);
       }
     }
-  }, [activePage]);
-  
+  }, [isMounted, pathname]);
+
   // Save subjects to localStorage whenever they change
   useEffect(() => {
+    if (!isMounted) return; // Only run on client-side
+    
     if (subjects.length > 0) {
       localStorage.setItem('subjects', JSON.stringify(subjects));
     }
-  }, [subjects]);
+  }, [subjects, isMounted]);
 
   // Navigation items
   const mainNavItems: Topic[] = [
@@ -393,7 +429,20 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
 
   // Navigation item styles based on active state
   const getNavItemStyle = (id: string, level: number = 0) => {
-    const isActive = activePage === id;
+    // Only check pathname when component has mounted (client-side)
+    const currentPath = isMounted ? pathname : '';
+    
+    // Only highlight dashboard when actually on the dashboard page
+    let isActive = activePage === id;
+    
+    // If current path contains '/subjects/', don't highlight dashboard or workspace items
+    if (currentPath && currentPath.includes('/subjects/')) {
+      // For workspace items (dashboard, tests, etc.), don't highlight 
+      const workspaceIds = ['dashboard', 'tests', 'mind-maps', 'flashcards', 'settings', 'help'];
+      if (workspaceIds.includes(id)) {
+        isActive = false;
+      }
+    }
     
     return {
       display: 'flex',
@@ -592,7 +641,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                           e.stopPropagation();
                           openAddNoteModal(item.id);
                         }}
-                        title="Add note"
+                        title="Add subtopic"
                       >
                         <Plus size={14} style={{ color: 'var(--text-tertiary)', opacity: 0.7 }} />
                       </button>
@@ -609,11 +658,18 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                             color: 'var(--text-tertiary)',
                             width: '24px',
                             height: '24px',
-                            borderRadius: '4px'
+                            borderRadius: '4px',
+                            zIndex: 1
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            // Toggle dropdown menu
+                            // Close all other dropdowns first
+                            document.querySelectorAll('.subject-menu > div, .note-menu > div').forEach((el) => {
+                              if (el instanceof HTMLElement) {
+                                el.style.display = 'none';
+                              }
+                            });
+                            // Toggle this dropdown menu
                             const dropdown = e.currentTarget.nextElementSibling as HTMLElement;
                             if (dropdown) {
                               dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
@@ -621,7 +677,11 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                           }}
                           title="More options"
                         >
-                          <MoreHorizontal size={14} style={{ color: 'var(--text-tertiary)', opacity: 0.7 }} />
+                          <MoreHorizontal size={14} style={{ 
+                            color: 'var(--text-tertiary)', 
+                            opacity: 0.7,
+                            pointerEvents: 'none' // This prevents the SVG from capturing clicks
+                          }} />
                         </button>
                         
                         <div 
@@ -683,7 +743,6 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                             justifyContent: 'space-between',
                             ...getNavItemStyle(subtopic.id, 1)
                           }}
-                          onClick={() => router.push(subtopic.href)}
                         >
                           <Link 
                             href={subtopic.href}
@@ -713,23 +772,32 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                                 width: '24px',
                                 height: '24px',
                                 borderRadius: '4px',
-                                opacity: 0,
-                                transition: 'opacity 0.2s'
+                                opacity: 1, // Always visible
+                                zIndex: 1 // Ensure button is above other elements
                               }}
                               onClick={(e) => {
+                                e.preventDefault();
                                 e.stopPropagation();
-                                // Toggle dropdown menu
+                                
+                                // Close all other dropdowns first
+                                document.querySelectorAll('.subject-menu > div, .note-menu > div').forEach((el) => {
+                                  if (el instanceof HTMLElement) {
+                                    el.style.display = 'none';
+                                  }
+                                });
+                                
+                                // Toggle this dropdown menu
                                 const dropdown = e.currentTarget.nextElementSibling as HTMLElement;
                                 if (dropdown) {
                                   dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
                                 }
                               }}
                               title="More options"
-                              onMouseEnter={(e) => {
-                                e.currentTarget.style.opacity = '1';
-                              }}
                             >
-                              <MoreHorizontal size={14} style={{ color: 'var(--text-tertiary)' }} />
+                              <MoreHorizontal size={14} style={{ 
+                                color: 'var(--text-tertiary)',
+                                pointerEvents: 'none' // This prevents the SVG from capturing clicks
+                              }} />
                             </button>
                             
                             <div 
@@ -755,6 +823,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                                   borderBottom: '1px solid var(--border-color)'
                                 }}
                                 onClick={(e) => {
+                                  e.preventDefault();
                                   e.stopPropagation();
                                   e.currentTarget.parentElement!.style.display = 'none';
                                   openRenameNoteModal(item.id, subtopic.id);
@@ -770,6 +839,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                                   color: '#e53e3e'
                                 }}
                                 onClick={(e) => {
+                                  e.preventDefault();
                                   e.stopPropagation();
                                   e.currentTarget.parentElement!.style.display = 'none';
                                   openDeleteNoteModal(item.id, subtopic.id);
@@ -795,7 +865,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                       }}
                     >
                       {renderIcon(Plus, 'var(--text-tertiary)')}
-                      <span style={{ fontSize: '13px' }}>Add note</span>
+                      <span style={{ fontSize: '13px' }}>Add subtopic</span>
                     </div>
                   )}
                 </div>
@@ -889,7 +959,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
       {/* Add Note Modal */}
       <Modal
         isOpen={isAddNoteModalOpen}
-        title="Add New Note"
+        title="Add New Subtopic"
         onClose={() => setIsAddNoteModalOpen(false)}
       >
         <div>
@@ -897,7 +967,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
             type="text"
             value={newNoteName}
             onChange={(e) => setNewNoteName(e.target.value)}
-            placeholder="Enter note name"
+            placeholder="Enter subtopic name"
             style={{
               width: '100%',
               padding: '10px 12px',
@@ -940,7 +1010,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
                 cursor: 'pointer',
               }}
             >
-              Add Note
+              Add Subtopic
             </button>
           </div>
         </div>
@@ -1058,7 +1128,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
             boxShadow: 'var(--box-shadow)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', color: 'var(--text-primary)' }}>Rename Note</h2>
+              <h2 style={{ margin: 0, fontSize: '18px', color: 'var(--text-primary)' }}>Rename Subtopic</h2>
               <button
                 onClick={() => setIsRenameNoteModalOpen(false)}
                 style={{
@@ -1077,7 +1147,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
               type="text"
               value={newNoteName}
               onChange={(e) => setNewNoteName(e.target.value)}
-              placeholder="Enter note name"
+              placeholder="Enter subtopic name"
               style={{
                 width: '100%',
                 padding: '12px',
@@ -1163,7 +1233,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
             </div>
             
             <p style={{ color: 'var(--text-primary)', marginBottom: '16px' }}>
-              Are you sure you want to delete this subject? This will also delete all notes within it. This action cannot be undone.
+              Are you sure you want to delete this subject? This will also delete all subtopics within it. This action cannot be undone.
             </p>
             
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
@@ -1223,7 +1293,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
             boxShadow: 'var(--box-shadow)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', color: 'var(--text-primary)' }}>Delete Note</h2>
+              <h2 style={{ margin: 0, fontSize: '18px', color: 'var(--text-primary)' }}>Delete Subtopic</h2>
               <button
                 onClick={() => setIsDeleteNoteModalOpen(false)}
                 style={{
@@ -1239,7 +1309,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
             </div>
             
             <p style={{ color: 'var(--text-primary)', marginBottom: '16px' }}>
-              Are you sure you want to delete this note? This action cannot be undone.
+              Are you sure you want to delete this subtopic? This action cannot be undone.
             </p>
             
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>

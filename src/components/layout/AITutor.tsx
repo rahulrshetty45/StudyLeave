@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PaperAirplaneIcon } from '@heroicons/react/24/outline';
 import { X, GripVertical, Loader2, Save } from 'lucide-react';
 import { generateAIResponse } from '@/lib/openai';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -23,6 +23,7 @@ interface NoteContent {
 
 export default function AITutor() {
   const router = useRouter();
+  const pathname = usePathname(); // Use the pathname hook
   const [expanded, setExpanded] = useState(true);
   const [input, setInput] = useState('');
   const [width, setWidth] = useState(320);
@@ -33,6 +34,8 @@ export default function AITutor() {
   const [justSaved, setJustSaved] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const dragHandleRef = useRef<HTMLDivElement>(null);
+  // Add a ref to track when the page changes
+  const routeChangeRef = useRef<string | null>(null);
 
   // Load messages and other settings from localStorage
   useEffect(() => {
@@ -91,8 +94,29 @@ export default function AITutor() {
 
   // Scroll to bottom of messages on new message
   useEffect(() => {
+    // Don't auto-scroll if this is a route change
+    if (routeChangeRef.current === pathname) {
+      // Route change just happened, don't scroll
+      return;
+    }
+    
+    // Only auto-scroll to bottom for new messages
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, pathname]);
+
+  // Add a new useEffect to track route changes
+  useEffect(() => {
+    if (pathname) {
+      routeChangeRef.current = pathname;
+      
+      // Reset the route change tracker after a short delay
+      const timer = setTimeout(() => {
+        routeChangeRef.current = null;
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [pathname]);
 
   // Set up drag event handlers
   useEffect(() => {
