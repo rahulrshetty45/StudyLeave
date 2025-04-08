@@ -24,8 +24,10 @@ import {
   CheckCircle,
   Calendar,
   FileText,
-  Minus
+  Minus,
+  Sparkles
 } from 'lucide-react';
+import { generateAIResponse, Message } from '@/lib/openai';
 
 // Define block types
 type BlockType = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bulletList' | 'numberedList' | 'todo' | 'code' | 'quote' | 'divider';
@@ -54,6 +56,7 @@ export default function NotePage() {
   const [showBlockMenu, setShowBlockMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   
   const titleRef = useRef<HTMLHeadingElement>(null);
   const blockRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
@@ -828,6 +831,103 @@ export default function NotePage() {
     );
   };
 
+  // Add a function to generate content with AI
+  const generateAIContent = async () => {
+    try {
+      setIsGenerating(true);
+      
+      // Format subject and note names for the prompt
+      const formattedSubjectName = subject.split('-').map(word => 
+        word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+      
+      const formattedNoteName = note.split('-').map(word => 
+        word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+      
+      // Create a system message that instructs the AI to generate structured notes
+      const systemMessage: Message = {
+        role: 'system',
+        content: `You are an expert tutor who creates detailed, well-structured study notes. Generate comprehensive, educational content for a study note about "${formattedNoteName}" in the subject "${formattedSubjectName}".
+        
+Format your response with clear headers using Markdown:
+- Start with a # heading for the main topic
+- Use ## for major section headings
+- Use ### for subsections
+- Include relevant lists, definitions, examples, and explanations
+- Focus on accurate, educational content that would be useful for students studying this topic
+- Be comprehensive but concise
+- If relevant, include formulas, key concepts, and important facts
+- Format any math or formulas clearly
+
+The notes will be saved in a note-taking application, so make them well-organized and useful for studying.`
+      };
+      
+      // Create a user message
+      const userMessage: Message = {
+        role: 'user',
+        content: `Please generate comprehensive study notes on "${formattedNoteName}" for my ${formattedSubjectName} class. Include all important concepts, definitions, and explanations.`
+      };
+      
+      // Generate the response
+      const aiResponse = await generateAIResponse([systemMessage, userMessage]);
+      
+      if (typeof aiResponse === 'string') {
+        // Split the response into paragraphs
+        const contentLines = aiResponse.split('\n');
+        
+        // Create new blocks from the content
+        const newBlocks: Block[] = contentLines.map(line => {
+          // Determine block type based on content
+          let type: BlockType = 'paragraph';
+          if (line.startsWith('# ')) {
+            type = 'heading1';
+            line = line.substring(2);
+          } else if (line.startsWith('## ')) {
+            type = 'heading2';
+            line = line.substring(3);
+          } else if (line.startsWith('### ')) {
+            type = 'heading3';
+            line = line.substring(4);
+          } else if (line.startsWith('- ')) {
+            type = 'bulletList';
+            line = line.substring(2);
+          } else if (line.match(/^\d+\.\s/)) {
+            type = 'numberedList';
+            line = line.replace(/^\d+\.\s/, '');
+          } else if (line.startsWith('> ')) {
+            type = 'quote';
+            line = line.substring(2);
+          } else if (line === '---') {
+            type = 'divider';
+            line = '';
+          }
+          
+          return {
+            id: generateId(),
+            type,
+            content: line.trim()
+          };
+        }).filter(block => block.content !== ''); // Remove empty blocks
+        
+        // If there are no blocks, add a default paragraph
+        if (newBlocks.length === 0) {
+          newBlocks.push({
+            id: generateId(),
+            type: 'paragraph',
+            content: ''
+          });
+        }
+        
+        // Set the new blocks
+        setBlocks(newBlocks);
+        localStorage.setItem(blocksKey, JSON.stringify(newBlocks));
+      }
+    } catch (error) {
+      console.error('Error generating AI content:', error);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <AppLayout>
       <div style={{
@@ -848,27 +948,65 @@ export default function NotePage() {
           <span>{title}</span>
         </div>
         
-        {/* Note Title */}
-        <h1
-          ref={titleRef}
-          contentEditable
-          suppressContentEditableWarning
-          style={{
-            fontSize: '40px',
-            fontWeight: '800',
-            marginBottom: '24px',
-            outline: 'none',
-            borderBottom: isTyping ? '1px solid var(--border-color)' : '1px solid transparent',
-            paddingBottom: '8px',
-            transition: 'border-color 0.2s',
-            color: 'var(--text-primary)'
-          }}
-          onInput={handleTitleChange}
-          onFocus={() => setIsTyping(true)}
-          onBlur={handleTitleBlur}
-        >
-          {title}
-        </h1>
+        {/* Note Title and Autofill Button */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          marginBottom: '24px'
+        }}>
+          <h1
+            ref={titleRef}
+            contentEditable
+            suppressContentEditableWarning
+            style={{
+              fontSize: '40px',
+              fontWeight: '800',
+              outline: 'none',
+              borderBottom: isTyping ? '1px solid var(--border-color)' : '1px solid transparent',
+              paddingBottom: '8px',
+              transition: 'border-color 0.2s',
+              color: 'var(--text-primary)',
+              marginBottom: 0,
+              flex: 1
+            }}
+            onInput={handleTitleChange}
+            onFocus={() => setIsTyping(true)}
+            onBlur={handleTitleBlur}
+          >
+            {title}
+          </h1>
+          
+          <button
+            onClick={generateAIContent}
+            disabled={isGenerating}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              backgroundColor: 'var(--highlight-color)',
+              color: 'white',
+              fontSize: '14px',
+              fontWeight: '500',
+              border: 'none',
+              cursor: isGenerating ? 'default' : 'pointer',
+              opacity: isGenerating ? 0.7 : 1,
+              transition: 'opacity 0.2s ease',
+              marginLeft: '16px'
+            }}
+          >
+            {isGenerating ? (
+              <>Generating...</>
+            ) : (
+              <>
+                <Sparkles size={16} />
+                Autofill with AI
+              </>
+            )}
+          </button>
+        </div>
         
         {/* Editor Blocks */}
         <div className="notion-blocks-container" style={{
