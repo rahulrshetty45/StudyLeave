@@ -26,21 +26,14 @@ import {
   FileText,
   Minus,
   Sparkles,
-  HelpCircle
+  HelpCircle,
+  Check
 } from 'lucide-react';
 import { generateAIResponse, Message } from '@/lib/openai';
 import { FaArrowLeft, FaLink, FaRegTrashAlt, FaSave, FaImage, FaCode, FaParagraph, FaListUl, FaHeading, FaQuoteLeft, FaStar, FaMarkdown, FaClipboard, FaTimes } from 'react-icons/fa';
-import BlockMenu from '@/components/notes/BlockMenu';
-import { v4 as uuidv4 } from 'uuid';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { debounce } from 'lodash';
-import Spinner from '@/components/ui/Spinner';
-import { LuX } from 'react-icons/lu';
-import { PiSpinnerBold, PiSpinnerGap } from 'react-icons/pi';
-import OpenAI from 'openai';
-import { BsArrowsExpand, BsArrowsCollapse } from 'react-icons/bs';
-import { FaCompress, FaExpand } from 'react-icons/fa';
+import { PiSpinnerGap } from 'react-icons/pi';
 import { LuExternalLink } from 'react-icons/lu';
 
 // Define block types
@@ -143,7 +136,7 @@ export default function NotePage() {
   
   // Generate a unique ID for blocks
   const generateId = () => {
-    return Math.random().toString(36).substr(2, 9);
+    return Date.now().toString(36) + Math.random().toString(36).substring(2);
   };
   
   // Handle title changes - only update localStorage during typing, not React state
