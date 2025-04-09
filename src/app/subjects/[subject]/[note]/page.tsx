@@ -1068,10 +1068,15 @@ The notes will be saved in a note-taking application, so make them well-organize
           left: rect.left + (rect.width / 2)
         });
         
-        // Show tooltip immediately for any selection (remove delay)
-        if (selectedTextContent && selectedTextContent.length > 2) {
-          setShowSelectionTooltip(true);
-          console.log("SHOWING selection tooltip for:", selectedTextContent);
+        // Only show tooltip for substantial selections (15+ characters)
+        // This prevents the tooltip from appearing for tiny selections
+        if (selectedTextContent && selectedTextContent.length > 15) {
+          // Check if user has disabled the tooltip in localStorage
+          const tooltipsDisabled = localStorage.getItem('disableSelectionTooltips') === 'true';
+          if (!tooltipsDisabled) {
+            setShowSelectionTooltip(true);
+            console.log("SHOWING selection tooltip for:", selectedTextContent);
+          }
         }
       }
     };
@@ -1323,6 +1328,7 @@ The notes will be saved in a note-taking application, so make them well-organize
         {/* Selection tooltip */}
         {showSelectionTooltip && (
           <div 
+            ref={selectionTooltipRef}
             className="fixed z-[9999] bg-white dark:bg-slate-800 shadow-xl rounded-lg flex items-center border-2 border-blue-500 dark:border-blue-400"
             style={{ 
               top: `${tooltipPosition.top}px`, 
@@ -1355,6 +1361,22 @@ The notes will be saved in a note-taking application, so make them well-organize
                   <span>Explain with AI</span>
                 </>
               )}
+            </button>
+            
+            {/* Close button */}
+            <button
+              onClick={() => {
+                setShowSelectionTooltip(false);
+                // Ask if user wants to disable tooltips permanently
+                const disableForever = window.confirm('Would you like to disable the selection popup? You can still use the Explain Selection button at the top.');
+                if (disableForever) {
+                  localStorage.setItem('disableSelectionTooltips', 'true');
+                  setDebugInfo('Selection tooltips disabled');
+                }
+              }}
+              className="ml-2 p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full"
+            >
+              <X size={14} />
             </button>
           </div>
         )}
