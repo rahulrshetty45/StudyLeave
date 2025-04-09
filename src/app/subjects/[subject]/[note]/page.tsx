@@ -994,7 +994,8 @@ The notes will be saved in a note-taking application, so make them well-organize
     setIsExplaining(true);
     
     // Format the subject and note names for context
-    const formattedSubject = formatSubjectName(params.subject);
+    const subjectParam = Array.isArray(params.subject) ? params.subject[0] : params.subject;
+    const formattedSubject = formatSubjectName(subjectParam);
     const formattedNote = title || "this note";
     
     try {
@@ -1076,7 +1077,7 @@ The notes will be saved in a note-taking application, so make them well-organize
     };
     
     // Handle clicks outside the tooltip to close it
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: globalThis.MouseEvent) => {
       if (
         selectionTooltipRef.current && 
         !selectionTooltipRef.current.contains(event.target as Node) &&
