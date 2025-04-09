@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, KeyboardEvent, MouseEvent, ChangeEvent, DragEvent } from 'react';
 import { useParams } from 'next/navigation';
 import AppLayout from '@/components/layout/AppLayout';
 import parse from 'html-react-parser';
@@ -25,9 +25,23 @@ import {
   Calendar,
   FileText,
   Minus,
-  Sparkles
+  Sparkles,
+  HelpCircle
 } from 'lucide-react';
 import { generateAIResponse, Message } from '@/lib/openai';
+import { FaArrowLeft, FaLink, FaRegTrashAlt, FaSave, FaImage, FaCode, FaParagraph, FaListUl, FaHeading, FaQuoteLeft, FaStar, FaMarkdown, FaClipboard, FaTimes } from 'react-icons/fa';
+import BlockMenu from '@/components/notes/BlockMenu';
+import { v4 as uuidv4 } from 'uuid';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
+import { debounce } from 'lodash';
+import Spinner from '@/components/ui/Spinner';
+import { LuX } from 'react-icons/lu';
+import { PiSpinnerBold, PiSpinnerGap } from 'react-icons/pi';
+import OpenAI from 'openai';
+import { BsArrowsExpand, BsArrowsCollapse } from 'react-icons/bs';
+import { FaCompress, FaExpand } from 'react-icons/fa';
+import { LuExternalLink } from 'react-icons/lu';
 
 // Define block types
 type BlockType = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bulletList' | 'numberedList' | 'todo' | 'code' | 'quote' | 'divider';
@@ -37,6 +51,12 @@ interface Block {
   type: BlockType;
   content: string;
   checked?: boolean;
+}
+
+// Add tooltipPosition state
+interface Position {
+  top: number;
+  left: number;
 }
 
 export default function NotePage() {
@@ -60,6 +80,21 @@ export default function NotePage() {
   
   const titleRef = useRef<HTMLHeadingElement>(null);
   const blockRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
+  
+  // Add state to handle text selection
+  const [selectedText, setSelectedText] = useState<string>('');
+  const [showSelectionTooltip, setShowSelectionTooltip] = useState<boolean>(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const selectionTooltipRef = useRef<HTMLDivElement>(null);
+  
+  // Add a debug state to track selection status
+  const [debugInfo, setDebugInfo] = useState<string>('');
+  
+  // Add a processing flag at the component level
+  const [isEventDispatched, setIsEventDispatched] = useState<boolean>(false);
+  
+  // Keep the isExplaining state since it's still needed for button state
+  const [isExplaining, setIsExplaining] = useState<boolean>(false);
   
   // Initialize title and blocks from localStorage or defaults
   useEffect(() => {
@@ -954,6 +989,129 @@ The notes will be saved in a note-taking application, so make them well-organize
     }
   };
 
+  // Improve the explanation handling
+  const handleExplainText = async () => {
+    // If already explaining or no text selected, don't proceed
+    if (isExplaining || !selectedText.trim()) {
+      console.log("Skipping explanation request:", isExplaining ? "Already explaining" : "No text selected");
+      return;
+    }
+    
+    // Set explaining state immediately to prevent duplicate calls
+    setIsExplaining(true);
+    
+    // Format the subject and note names for context
+    const formattedSubject = formatSubjectName(params.subject);
+    const formattedNote = title || "this note";
+    
+    try {
+      // First dispatch the event to the AI Tutor - send to one place only
+      // This ensures the explanation only appears in the chat, not in the popup
+      const explainEvent = new CustomEvent('explainText', {
+        detail: {
+          text: selectedText,
+          source: `${formattedSubject} (${formattedNote})`,
+          id: Date.now()
+        }
+      });
+      
+      // Dispatch only once to window
+      window.dispatchEvent(explainEvent);
+      console.log(`Event dispatched at ${new Date().toISOString()}`);
+      
+      // Skip the local explanation popup entirely - only use AI Tutor
+      // This solves the problem of potentially duplicating API calls
+      
+      // Save to localStorage as fallback for the AI Tutor
+      localStorage.setItem('pendingExplanation', JSON.stringify({
+        text: selectedText,
+        source: `${formattedSubject} (${formattedNote})`,
+        timestamp: Date.now(),
+        id: explainEvent.detail.id
+      }));
+      
+      // Clear selection
+      window.getSelection()?.removeAllRanges();
+      setDebugInfo(`Explanation request sent to AI Tutor`);
+    } catch (error) {
+      console.error("Error dispatching explanation event:", error);
+      if (error instanceof Error) {
+        setDebugInfo(`Error: ${error.message}`);
+      }
+    } finally {
+      // Reset explanation state after a delay
+      setTimeout(() => {
+        setIsExplaining(false);
+      }, 1000);
+    }
+  };
+
+  // Add useEffect for text selection
+  useEffect(() => {
+    const handleTextSelection = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+        // Clear the tooltip if no text is selected
+        setShowSelectionTooltip(false);
+        setDebugInfo('No text selected');
+        return;
+      }
+      
+      // Get selected text
+      const selectedTextContent = selection.toString().trim();
+      console.log("Text selected:", selectedTextContent);
+      setSelectedText(selectedTextContent);
+      setDebugInfo(`Selected: "${selectedTextContent.substring(0, 20)}${selectedTextContent.length > 20 ? '...' : ''}"`);
+      
+      // Position tooltip near selection
+      if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        
+        setTooltipPosition({
+          top: rect.bottom + scrollTop + 10,
+          left: rect.left + (rect.width / 2)
+        });
+        
+        // Show tooltip immediately for any selection (remove delay)
+        if (selectedTextContent && selectedTextContent.length > 2) {
+          setShowSelectionTooltip(true);
+          console.log("SHOWING selection tooltip for:", selectedTextContent);
+        }
+      }
+    };
+    
+    // Handle clicks outside the tooltip to close it
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        selectionTooltipRef.current && 
+        !selectionTooltipRef.current.contains(event.target as Node) &&
+        showSelectionTooltip
+      ) {
+        setShowSelectionTooltip(false);
+      }
+    };
+    
+    document.addEventListener('selectionchange', handleTextSelection);
+    document.addEventListener('mouseup', handleTextSelection);
+    document.addEventListener('mousedown', handleClickOutside);
+    
+    return () => {
+      document.removeEventListener('selectionchange', handleTextSelection);
+      document.removeEventListener('mouseup', handleTextSelection);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showSelectionTooltip]);
+
+  // Add this helper function near the top of the component
+  const formatSubjectName = (subjectId: string): string => {
+    return subjectId
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   return (
     <AppLayout>
       <div style={{
@@ -1003,35 +1161,82 @@ The notes will be saved in a note-taking application, so make them well-organize
             {title}
           </h1>
           
-          <button
-            onClick={generateAIContent}
-            disabled={isGenerating}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 12px',
-              borderRadius: '6px',
-              backgroundColor: 'var(--highlight-color)',
-              color: 'white',
-              fontSize: '14px',
-              fontWeight: '500',
-              border: 'none',
-              cursor: isGenerating ? 'default' : 'pointer',
-              opacity: isGenerating ? 0.7 : 1,
-              transition: 'opacity 0.2s ease',
-              marginLeft: '16px'
-            }}
-          >
-            {isGenerating ? (
-              <>Generating...</>
-            ) : (
-              <>
-                <Sparkles size={16} />
-                Autofill with AI
-              </>
-            )}
-          </button>
+          <div style={{
+            display: 'flex',
+            gap: '10px'
+          }}>
+            {/* Manual Explain Button */}
+            <button
+              onClick={() => {
+                const selectedText = window.getSelection()?.toString().trim() || '';
+                if (selectedText.length > 0) {
+                  console.log("Manual explain button clicked with selection:", selectedText);
+                  setSelectedText(selectedText);
+                  handleExplainText();
+                } else {
+                  setDebugInfo("Please select some text first");
+                  setTimeout(() => setDebugInfo(''), 3000);
+                }
+              }}
+              disabled={isExplaining}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                backgroundColor: isExplaining ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                fontSize: '14px',
+                fontWeight: '500',
+                border: 'none',
+                cursor: isExplaining ? 'not-allowed' : 'pointer',
+                opacity: isExplaining ? 0.7 : 1,
+                transition: 'background-color 0.2s ease'
+              }}
+            >
+              {isExplaining ? (
+                <>
+                  <PiSpinnerGap className="animate-spin" size={16} />
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <>
+                  <FaStar size={14} />
+                  <span>Explain Selection</span>
+                </>
+              )}
+            </button>
+            
+            <button
+              onClick={generateAIContent}
+              disabled={isGenerating}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                backgroundColor: 'var(--highlight-color)',
+                color: 'white',
+                fontSize: '14px',
+                fontWeight: '500',
+                border: 'none',
+                cursor: isGenerating ? 'default' : 'pointer',
+                opacity: isGenerating ? 0.7 : 1,
+                transition: 'opacity 0.2s ease',
+              }}
+            >
+              {isGenerating ? (
+                <>Generating...</>
+              ) : (
+                <>
+                  <Sparkles size={16} />
+                  Autofill with AI
+                </>
+              )}
+            </button>
+          </div>
         </div>
         
         {/* Editor Blocks */}
@@ -1121,6 +1326,45 @@ The notes will be saved in a note-taking application, so make them well-organize
           })}
         </div>
         
+        {/* Selection tooltip */}
+        {showSelectionTooltip && (
+          <div 
+            className="fixed z-[9999] bg-white dark:bg-slate-800 shadow-xl rounded-lg flex items-center border-2 border-blue-500 dark:border-blue-400"
+            style={{ 
+              top: `${tooltipPosition.top}px`, 
+              left: `${tooltipPosition.left}px`,
+              transform: 'translateX(-50%)',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+              animation: 'fadeIn 0.2s ease-in-out',
+              padding: '6px 12px'
+            }}
+          >
+            <button
+              onClick={handleExplainText}
+              disabled={isExplaining}
+              className={`text-gray-700 dark:text-gray-300 px-3 py-2 rounded flex items-center space-x-2 text-sm font-medium
+                ${isExplaining 
+                  ? 'opacity-50 cursor-not-allowed' 
+                  : 'hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer'}`}
+              style={{ 
+                pointerEvents: isExplaining ? 'none' : 'all'
+              }}
+            >
+              {isExplaining ? (
+                <>
+                  <PiSpinnerGap className="animate-spin mr-2" size={16} />
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <>
+                  <FaStar size={14} className="text-yellow-500 mr-2" />
+                  <span>Explain with AI</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+        
         {/* Block Menu */}
         {showBlockMenu && selectedBlockId && (
           <div style={{
@@ -1190,6 +1434,22 @@ The notes will be saved in a note-taking application, so make them well-organize
           gap: '4px'
         }}>
           Last edited now
+        </div>
+        
+        {/* Debug info */}
+        <div style={{
+          position: 'fixed',
+          bottom: '10px',
+          right: '10px',
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          color: 'white',
+          padding: '8px 12px',
+          borderRadius: '4px',
+          fontSize: '12px',
+          zIndex: 9999,
+          pointerEvents: 'none'
+        }}>
+          {debugInfo || 'Waiting for selection...'}
         </div>
       </div>
       
@@ -1268,6 +1528,11 @@ The notes will be saved in a note-taking application, so make them well-organize
           padding: 2px 4px;
           border-radius: 4px;
           font-size: 0.9em;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-10px) translateX(-50%); }
+          to { opacity: 1; transform: translateY(0) translateX(-50%); }
         }
       `}</style>
     </AppLayout>

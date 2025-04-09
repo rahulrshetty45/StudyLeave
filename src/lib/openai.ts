@@ -1,17 +1,67 @@
 // Client-side API service for OpenAI calls
 // Instead of directly calling the OpenAI API from the client, we make a request to our API route
 
+// Import needed for timestamp tracking
+import { setTimeout } from 'timers';
+
+// Add a request tracker to prevent duplicate API calls
+const recentRequests = new Map<string, number>();
+const DUPLICATE_WINDOW_MS = 2000; // 2 seconds window to prevent duplicates
+const THROTTLE_WINDOW_MS = 5000; // 5 seconds global throttle window
+
+// Add a global throttle for ALL requests
+let globalLastRequestTime = 0;
+
 export interface Message {
   role: string;
   content: string;
 }
 
-export async function generateAIResponse(messages: Message[]) {
+export async function generateAIResponse(messages: Message[]): Promise<string> {
   try {
+    // IMPLEMENT GLOBAL THROTTLE - no more than one request every 1 second
+    const now = Date.now();
+    const timeSinceLastRequest = now - globalLastRequestTime;
+    
+    if (timeSinceLastRequest < 1000) {
+      console.log(`🛑 Global throttle: Blocking request, only ${timeSinceLastRequest}ms since last request`);
+      return "I'm processing your request. Please wait a moment before asking again.";
+    }
+    
+    // Update last request time
+    globalLastRequestTime = now;
+    
+    // Create a simple hash of the messages to track duplicates
+    const requestKey = JSON.stringify(messages.map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content.substring(0, 100) : '' // First 100 chars is enough for comparison
+    })));
+    
+    // Check if this is a duplicate request
+    const previousRequestTime = recentRequests.get(requestKey);
+    
+    if (previousRequestTime && (now - previousRequestTime < DUPLICATE_WINDOW_MS)) {
+      console.log("🛑 Blocking duplicate request within 2 second window");
+      return "I'm already processing a similar request. Please wait a moment.";
+    }
+    
+    // Record this request
+    recentRequests.set(requestKey, now);
+    
+    // Clean up old requests after a while
+    setTimeout(() => {
+      recentRequests.delete(requestKey);
+    }, DUPLICATE_WINDOW_MS * 2);
+    
+    // Continue with normal API call
     console.log('Sending request to /api/ai with', {
       messageCount: messages.length,
-      firstUserMessage: messages.find(m => m.role === 'user')?.content.substring(0, 50) + '...',
-      systemMessageLength: messages.find(m => m.role === 'system')?.content.length
+      isNotesGeneration: messages.some(m => 
+        m.role === 'system' && 
+        typeof m.content === 'string' && 
+        m.content.includes('Generate comprehensive study notes')
+      ),
+      model: process.env.OPENAI_MODEL_NAME || 'gpt-4o'
     });
     
     const response = await fetch('/api/ai', {

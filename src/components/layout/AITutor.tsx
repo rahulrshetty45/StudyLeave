@@ -21,6 +21,42 @@ interface NoteContent {
   targetSubject?: string;
 }
 
+// Add this at the top of the file after imports
+// Helper class to manage message state and prevent duplicate messages
+class MessageManager {
+  private lastExplainedText: string = '';
+  private explainTimestamp: number = 0;
+  private isCurrentlyExplaining: boolean = false;
+  private pendingLoadingId: number | null = null;
+
+  // Check if we're already explaining this text
+  isExplaining(text: string): boolean {
+    return this.isCurrentlyExplaining || 
+           (text === this.lastExplainedText && 
+            Date.now() - this.explainTimestamp < 5000);
+  }
+
+  // Mark that we're starting to explain this text
+  startExplaining(text: string): number {
+    this.lastExplainedText = text;
+    this.explainTimestamp = Date.now();
+    this.isCurrentlyExplaining = true;
+    this.pendingLoadingId = Date.now();
+    return this.pendingLoadingId;
+  }
+
+  // Get the ID of the current loading message
+  getLoadingId(): number | null {
+    return this.pendingLoadingId;
+  }
+
+  // Mark that we've finished explaining
+  finishExplaining(): void {
+    this.isCurrentlyExplaining = false;
+    this.pendingLoadingId = null;
+  }
+}
+
 export default function AITutor() {
   const router = useRouter();
   const pathname = usePathname(); // Use the pathname hook
@@ -36,6 +72,9 @@ export default function AITutor() {
   const dragHandleRef = useRef<HTMLDivElement>(null);
   // Add a ref to track when the page changes
   const routeChangeRef = useRef<string | null>(null);
+
+  // Replace the old state tracking with the new MessageManager
+  const messageManager = useRef<MessageManager>(new MessageManager());
 
   // Load messages and other settings from localStorage
   useEffect(() => {
@@ -1181,46 +1220,19 @@ export default function AITutor() {
     return { isCreationRequest: false, subjectName: '' };
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  // Memoize the handleSendMessageWithText function to avoid recreating it on every render
+  const handleSendMessageWithText = React.useCallback(async (text: string) => {
+    console.log("Sending message to AI:", text);
+    if (!text.trim() || isLoading) return;
 
-    const userMessage = { id: Date.now(), text: input, sender: 'user' as const };
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
     setIsLoading(true);
     
-    // Try to detect request type to determine correct handling
-    
-    // Check if user is requesting note generation
-    const { isRequest, subject, targetSubject } = isNoteGenerationRequest(userMessage.text);
-    
-    // Check if user is asking about existing content
-    const { isAsking, subject: askSubject, note: askNote } = isAskingAboutExistingContent(userMessage.text);
-    
-    // Check if user is requesting to create a new subject
-    const { isCreationRequest, subjectName } = isSubjectCreationRequest(userMessage.text);
-    
-    console.log("Request analysis:", { 
-      isRequest, 
-      subject, 
-      targetSubject,
-      isAsking,
-      askSubject,
-      askNote,
-      isCreationRequest,
-      subjectName
-    });
-    
-    // If this is a direct subject creation request, create it immediately
-    let subjectCreationResult = '';
-    if (isCreationRequest && subjectName) {
-      subjectCreationResult = createNewSubject(subjectName);
-    }
-
     try {
+      // We need to get the current messages state to ensure we have the latest
+      let currentMessages = [...messages];
+      
       // Format messages for OpenAI API
-      const formattedMessages = messages.map(msg => ({
+      const formattedMessages = currentMessages.map(msg => ({
         role: msg.sender === 'user' ? 'user' : 'assistant',
         content: msg.text
       }));
@@ -1228,276 +1240,259 @@ export default function AITutor() {
       // Add the new user message
       formattedMessages.push({
         role: 'user',
-        content: input
+        content: text
       });
 
-      // Different system messages based on request type
-      let systemMessage;
-      
-      // Get context about existing subjects
-      const subjectsContext = getExistingSubjectsContext();
-      
-      // Handle subject creation request
-      if (isCreationRequest && subjectName) {
-        // Subject was already created above
-        systemMessage = {
-          role: 'system',
-          content: `You are a helpful AI tutor assisting a student with their studies. The student has asked you to create a new subject.
-          
-          ${subjectCreationResult}
-          
-          Provide a helpful response confirming the creation of the subject. Suggest some note topics they might want to add to this subject that are specific to "${subjectName}".`
-        };
-      } else if (isAsking && askSubject) {
-        // If asking about a specific subject or note, provide the content
-        const noteContent = getNoteContent(askSubject, askNote);
+      // Create a system message focused on explaining text
+      const systemMessage = {
+        role: 'system',
+        content: `You are a helpful AI tutor assisting a student with their studies. The student has selected text from their notes and wants you to explain it in detail. 
         
-        systemMessage = {
-          role: 'system',
-          content: `You are a helpful AI tutor assisting a student with their studies. The student is asking about content in their study materials.
-          
-          ${noteContent}
-          
-          Provide a helpful response based on the content above. If they're asking about a specific topic within the note, focus on that part.`
-        };
-      } else if (isRequest) {
-        // Create a more specific system message that understands the context
-        const subjectContext = targetSubject 
-          ? `${subject} in the context of ${targetSubject}` 
-          : subject;
-          
-        // Get relevant notes content if applicable
-        const relevantNotes = subject ? getRelevantNotesContent(subject) : '';
-          
-        // Create a more tailored instruction if the user wants to create a new subject
-        const saveInstruction = targetSubject && targetSubject !== subject
-          ? `IMPORTANT: The user wants to save these notes to a subject called "${targetSubject}". Make sure to mention this in your response.`
-          : `IMPORTANT: Start your response with "I've generated structured notes on ${subjectContext} for you. Here's a preview:" followed by a brief preview of the notes.`;
-          
-        systemMessage = {
-          role: 'system',
-          content: `You are a helpful AI tutor assisting a student with their studies. The student has asked you to generate structured notes on ${subjectContext}. 
-          
-          ${subjectsContext}
-          
-          ${relevantNotes}
-          
-          Create comprehensive, well-structured study notes with clear headings, bullet points, and organized sections.
-          Format the notes with markdown:
-          - Use # for main headings
-          - Use ## for subheadings
-          - Use bullet points (- ) for lists
-          - Use numbered lists (1. ) for sequential points
-          - Include examples and key concepts
-          
-          ${saveInstruction}
-          
-          IMPORTANT: Always end your response with this EXACT phrase: "Would you like me to save these notes to your study materials?" This is necessary for the system to recognize your response as notes that can be saved.
-          
-          Aim for comprehensive but concise notes that cover key concepts and important details.`
-        };
-      } else {
-        systemMessage = {
-          role: 'system',
-          content: `You are a helpful AI tutor assisting a student with their studies. Provide concise, educational responses. You should focus on explaining concepts clearly and helping with academic subjects like math, science, language, and other educational topics.
-          
-          ${subjectsContext}
-          
-          If the user asks about their notes or study materials, you can reference the subjects and notes listed above.`
-        };
-      }
+        Provide a clear, educational explanation of the selected text. Break down complex concepts, provide examples if helpful, and ensure your explanation is accurate and informative.
+        
+        Focus specifically on explaining the text they've selected - be thorough but concise. If the text contains technical terms, define them.`
+      };
       
       formattedMessages.unshift(systemMessage);
 
       // Show temporary loading message
       const loadingId = Date.now();
-      setMessages(prevMsgs => [...prevMsgs, { 
-        id: loadingId, 
-        text: "Thinking...", 
-        sender: 'ai' 
-      }]);
+      setMessages(prevMsgs => {
+        const updatedMessages = [...prevMsgs, { 
+          id: loadingId, 
+          text: "Thinking...", 
+          sender: 'ai' as const
+        }];
+        // Save messages immediately
+        localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+        return updatedMessages;
+      });
 
+      console.log("Sending request to AI API");
       // Generate AI response
       const aiResponse = await generateAIResponse(formattedMessages);
+      console.log("Response received from AI");
       
       // Remove the loading message and add the real response
       setMessages(prevMsgs => {
         const filteredMsgs = prevMsgs.filter(m => m.id !== loadingId);
-        return [...filteredMsgs, { 
+        const updatedMessages = [...filteredMsgs, { 
           id: Date.now(), 
           text: aiResponse || "I'm sorry, I couldn't generate a response.", 
-          sender: 'ai' 
+          sender: 'ai' as const
         }];
+        // Save messages immediately
+        localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+        return updatedMessages;
       });
-      
-      // Check if this was a note generation response - more aggressive pattern matching
-      if (
-        (isRequest || 
-        aiResponse.includes("I've generated") || 
-        aiResponse.includes("structured notes") || 
-        aiResponse.includes("save these notes") ||
-        aiResponse.includes("add these notes") ||
-        aiResponse.includes("Feel free to add these notes") ||
-        aiResponse.includes("add this to your study materials") ||
-        aiResponse.includes("add this to your notes") ||
-        (aiResponse.includes("notes") && aiResponse.includes("study materials")) ||
-        (input.toLowerCase().includes("notes") && input.toLowerCase().includes("make") && aiResponse.length > 500) ||
-        aiResponse.length > 800) // If response is very long, it's likely a note
-        && aiResponse && !isAsking) { // Don't treat as note generation if they were asking about content
-        
-        console.log("Detected potential note generation", {
-          isRequest,
-          includesGenerated: aiResponse.includes("I've generated"),
-          includesStructuredNotes: aiResponse.includes("structured notes"),
-          includesSaveNotes: aiResponse.includes("save these notes"),
-          includesAddNotes: aiResponse.includes("add these notes"),
-          includesFreeToAdd: aiResponse.includes("Feel free to add these notes"),
-          notesAndStudyMaterials: (aiResponse.includes("notes") && aiResponse.includes("study materials")),
-          inputCondition: input.toLowerCase().includes("notes") && input.toLowerCase().includes("make"),
-          responseLengthCheck: aiResponse.length > 500,
-          responseLength: aiResponse.length
-        });
-
-        // Extract subject if not already detected
-        let detectedSubject = subject;
-        
-        if (!detectedSubject) {
-          // Try to extract subject from the response
-          const subjectMatch = aiResponse.match(/I've generated (?:structured )?notes on ([^.]+)/i);
-          if (subjectMatch && subjectMatch[1]) {
-            detectedSubject = subjectMatch[1].trim();
-          } else {
-            // Extract from the input if we couldn't get it from the response
-            let inputParts = input.split(/and\s+(make|add)/i);
-            if (inputParts.length > 1) {
-              detectedSubject = inputParts[0].trim();
-            } else {
-              // Fallback to a generic subject based on input
-              detectedSubject = input.replace(/make notes|create notes|generate notes|i need notes/gi, '').trim();
-              if (!detectedSubject || detectedSubject.length < 3) {
-                detectedSubject = "Notes";
-              }
-            }
-          }
-        }
-        
-        // Remove the introduction and closing question to isolate just the notes content
-        let content = aiResponse;
-        content = content.replace(/^I've generated (?:structured )?notes on .+?\. Here's a preview:/i, '');
-        content = content.replace(/Would you like me to save these notes to your study materials\?$/i, '');
-        
-        // Create appropriate title based on subject and targetSubject
-        let title;
-        
-        // Clean up the subject for title use
-        let cleanedSubject = detectedSubject
-          .replace(/^(make|create|generate|add|write)\s+(a|some|)\s*(notes|study material|content)\s+(on|about|for|related to)\s+/i, '')
-          .replace(/^(notes|study material|content)\s+(on|about|for|related to)\s+/i, '')
-          .replace(/\s+and\s+(make|add|create|put).*$/, ''); // Remove "and make..." part
-        
-        // If we get a really long subject that's likely a full user request, try to extract just the topic
-        if (cleanedSubject.length > 30 && cleanedSubject.includes(' ')) {
-          // Look for common topic indicators
-          const topicMatches = [
-            cleanedSubject.match(/(?:about|on|for)\s+([^,.]+)/i),
-            cleanedSubject.match(/^([^,.]+?)(?:\s+and|\s+to|\s+for|\s+in)/i)
-          ];
-          
-          for (const match of topicMatches) {
-            if (match && match[1] && match[1].length < cleanedSubject.length) {
-              cleanedSubject = match[1].trim();
-              break;
-            }
-          }
-        }
-        
-        // Get a more specific and clean title
-        if (targetSubject && cleanedSubject.toLowerCase() !== targetSubject.toLowerCase()) {
-          // Use the detected subject as the primary content of the title
-          title = `${cleanedSubject.charAt(0).toUpperCase() + cleanedSubject.slice(1)}`;
-        } else {
-          // For general subject notes, extract a meaningful title from the content
-          const firstHeadingMatch = content.match(/# ([^\n]+)/);
-          if (firstHeadingMatch && firstHeadingMatch[1]) {
-            // Use the first heading as the title
-            title = firstHeadingMatch[1].trim();
-          } else {
-            // Fallback to a more specific title
-            title = `${cleanedSubject.charAt(0).toUpperCase() + cleanedSubject.slice(1)}`;
-          }
-        }
-        
-        // Replace special characters that could cause issues in URLs
-        title = title.replace(/:/g, ' - ').replace(/[%?&]/g, ' ');
-        
-        // Ensure title isn't too long
-        if (title && title.length > 50) {
-          title = title.substring(0, 47) + '...';
-        }
-        
-        console.log("Generated note prepared:", {
-          title,
-          subject: detectedSubject,
-          targetSubject,
-          contentLength: content.length
-        });
-        
-        // Always attempt to set a generated note, with a minimum content length
-        if (content.length > 100) {
-          // Store the generated note
-          const noteData = {
-            title,
-            content: content.trim(),
-            subject: detectedSubject,
-            targetSubject
-          };
-          
-          console.log("Setting generated note:", noteData);
-          setGeneratedNote(noteData);
-        } else {
-          console.warn("Content too short to set as a generated note:", content.length);
-        }
-      } else {
-        // Clear generated note state if this wasn't a note generation response
-        console.log("Not setting generated note for this response type:", { 
-          isRequest, 
-          isAsking, 
-          responseLength: aiResponse.length 
-        });
-        setGeneratedNote(null);
-      }
     } catch (error) {
-      console.error('Error generating AI response:', error);
-      
-      // Remove any loading message that might be present
-      setMessages(prev => {
-        const withoutLoading = prev.filter(msg => msg.text !== "Thinking...");
-        return [...withoutLoading, { 
+      console.error('Error explaining text:', error);
+      setMessages(prevMsgs => {
+        const filteredMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
+        const updatedMessages = [...filteredMsgs, { 
           id: Date.now(), 
-          text: error instanceof Error 
-            ? `I'm sorry, I encountered an error: ${error.message}` 
-            : "I'm sorry, I encountered an error. Please try again later.", 
-          sender: 'ai' 
+          text: "I'm sorry, I encountered an error while trying to explain the text.", 
+          sender: 'ai' as const
         }];
+        // Save messages immediately
+        localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+        return updatedMessages;
       });
-      
-      // For connection errors, display fallback help message instead of technical error
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        setMessages(prev => {
-          const withoutLoading = prev.filter(msg => msg.text !== "Thinking...");
-          return [...withoutLoading, { 
-            id: Date.now(), 
-            text: "I'm having trouble connecting to my knowledge services. This often happens when the API key isn't configured properly. Please check the environment variables in your AWS Amplify deployment to ensure OPENAI_API_KEY and MODEL_NAME are set correctly.", 
-            sender: 'ai' 
-          }];
-        });
-      }
     } finally {
       setIsLoading(false);
-      
-      // Save messages to localStorage for persistence
-      localStorage.setItem('aiTutorMessages', JSON.stringify(messages));
     }
+  }, [isLoading, messages, setMessages]);
+
+  // Handle explain text event from notes page
+  useEffect(() => {
+    console.log("Setting up explainText event listener");
+    
+    const handleExplainText = (event: CustomEvent<{ text: string, source: string }>) => {
+      const { text, source } = event.detail;
+      
+      if (!text || text.length === 0) {
+        return;
+      }
+      
+      // Check if we're already explaining this text
+      if (messageManager.current.isExplaining(text)) {
+        console.log("Already explaining this text - skipping duplicate request");
+        return;
+      }
+      
+      console.log("Processing explanation request for:", text.substring(0, 30) + "...");
+      
+      // Force expand the AI Tutor
+      setExpanded(true);
+      
+      // Format the question
+      const question = `Please explain this text that I selected from my notes on ${source}:\n\n"${text}"`;
+      
+      // Generate a unique ID for this request
+      const requestId = Date.now();
+      
+      // Add ONLY the user message first - no thinking message yet
+      setMessages(prev => {
+        // Check if we already have this exact question
+        if (prev.some(msg => msg.sender === 'user' && msg.text === question)) {
+          console.log("This exact question is already in the chat - skipping");
+          return prev;
+        }
+        
+        const updatedMessages = [
+          ...prev, 
+          { 
+            id: requestId, 
+            text: question, 
+            sender: 'user' as const
+          }
+        ];
+        
+        localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+        return updatedMessages;
+      });
+      
+      // Start explaining and get the loading message ID
+      const loadingId = messageManager.current.startExplaining(text);
+      
+      // Short timeout to ensure the user message is added first
+      setTimeout(() => {
+        // Now add the thinking message in a separate update
+        setMessages(prev => {
+          // Skip if a thinking message already exists
+          if (prev.some(msg => msg.sender === 'ai' && msg.text === "Thinking...")) {
+            return prev;
+          }
+          
+          const updatedMessages = [
+            ...prev,
+            { 
+              id: loadingId, 
+              text: "Thinking...", 
+              sender: 'ai' as const
+            }
+          ];
+          
+          localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+          return updatedMessages;
+        });
+        
+        // Generate the AI response
+        generateAIResponse([
+          {
+            role: 'system',
+            content: `You are a helpful AI tutor assisting a student with their studies. The student has selected text from their notes and wants you to explain it in detail. 
+            
+            Provide a clear, educational explanation of the selected text. Break down complex concepts, provide examples if helpful, and ensure your explanation is accurate and informative.
+            
+            Focus specifically on explaining the text they've selected - be thorough but concise. If the text contains technical terms, define them.`
+          },
+          {
+            role: 'user',
+            content: question
+          }
+        ]).then(aiResponse => {
+          console.log("Response received from AI");
+          
+          // Replace ALL thinking messages with the actual response
+          setMessages(prevMsgs => {
+            // Remove all thinking messages
+            const filteredMsgs = prevMsgs.filter(m => m.text !== "Thinking...");
+            
+            const updatedMessages = [...filteredMsgs, { 
+              id: Date.now(), 
+              text: aiResponse || "I'm sorry, I couldn't generate a response.", 
+              sender: 'ai' as const
+            }];
+            
+            localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+            return updatedMessages;
+          });
+        }).catch(error => {
+          console.error('Error generating explanation:', error);
+          
+          // Replace ALL thinking messages with error message
+          setMessages(prevMsgs => {
+            // Remove all thinking messages
+            const filteredMsgs = prevMsgs.filter(m => m.text !== "Thinking...");
+            
+            const updatedMessages = [...filteredMsgs, { 
+              id: Date.now(), 
+              text: "I'm sorry, I encountered an error while trying to explain the text.", 
+              sender: 'ai' as const
+            }];
+            
+            localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+            return updatedMessages;
+          });
+        }).finally(() => {
+          // Clear the explaining state
+          messageManager.current.finishExplaining();
+          setIsLoading(false);
+        });
+      }, 50);
+    };
+    
+    // Add event listener to window only
+    window.addEventListener('explainText', handleExplainText as EventListener);
+    console.log("Event listener added for explainText");
+    
+    // Clean up event listener
+    return () => {
+      console.log("Removing explainText event listener");
+      window.removeEventListener('explainText', handleExplainText as EventListener);
+    };
+  }, [setMessages]);
+
+  // Replace the existing pendingExplanation processor with a simpler version
+  useEffect(() => {
+    const checkPendingExplanation = () => {
+      try {
+        const pendingExplanationJson = localStorage.getItem('pendingExplanation');
+        if (pendingExplanationJson) {
+          const pendingExplanation = JSON.parse(pendingExplanationJson);
+          
+          // Only process if it's recent and we're not already explaining something
+          const isRecent = Date.now() - pendingExplanation.timestamp < 10000; // 10 seconds
+          
+          if (isRecent && !messageManager.current.isExplaining(pendingExplanation.text)) {
+            // Dispatch to the event handler
+            const event = new CustomEvent('explainText', {
+              detail: {
+                text: pendingExplanation.text,
+                source: pendingExplanation.source
+              }
+            });
+            
+            window.dispatchEvent(event);
+          }
+          
+          // Remove regardless of whether we processed it
+          localStorage.removeItem('pendingExplanation');
+        }
+      } catch (error) {
+        console.error('Error processing pending explanation:', error);
+        localStorage.removeItem('pendingExplanation');
+      }
+    };
+    
+    // Check once on mount and then every 5 seconds
+    checkPendingExplanation();
+    const interval = setInterval(checkPendingExplanation, 5000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+
+    const userMessage = { id: Date.now(), text: input, sender: 'user' as const };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    
+    // Use the existing text message handler with the input value
+    handleSendMessageWithText(input);
   };
 
   const handleSaveNote = () => {
@@ -1550,6 +1545,7 @@ export default function AITutor() {
   if (!expanded) {
     return (
       <button
+        id="ai-tutor-component" // Add ID to button view too
         onClick={toggleExpanded}
         style={{
           position: 'fixed',
@@ -1576,6 +1572,7 @@ export default function AITutor() {
 
   return expanded ? (
     <div
+      id="ai-tutor-component" // Add ID to expanded view
       className={`ai-tutor ${expanded ? 'expanded' : 'collapsed'}`}
       style={{
         width: expanded ? `${width}px` : '0',
