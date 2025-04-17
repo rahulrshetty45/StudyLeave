@@ -28,7 +28,8 @@ import {
   Sparkles,
   HelpCircle,
   Check,
-  Send
+  Send,
+  Underline
 } from 'lucide-react';
 import { generateAIResponse, Message } from '@/lib/openai';
 import { FaArrowLeft, FaLink, FaRegTrashAlt, FaSave, FaImage, FaCode, FaParagraph, FaListUl, FaHeading, FaQuoteLeft, FaStar, FaMarkdown, FaClipboard, FaTimes } from 'react-icons/fa';
@@ -80,6 +81,11 @@ export default function NotePage() {
   const [showSelectionTooltip, setShowSelectionTooltip] = useState<boolean>(false);
   const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const selectionTooltipRef = useRef<HTMLDivElement>(null);
+  
+  // Add state for context menu
+  const [showContextMenu, setShowContextMenu] = useState<boolean>(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   
   // Add a debug state to track selection status
   const [debugInfo, setDebugInfo] = useState<string>('');
@@ -1087,27 +1093,265 @@ The notes will be saved in a note-taking application, so make them well-organize
       }
     };
     
+    // Handle right-click for context menu
+    const handleContextMenu = (event: globalThis.MouseEvent) => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+        // If no text is selected, hide context menu
+        setShowContextMenu(false);
+        return;
+      }
+      
+      // Only show context menu if we're in an editable block
+      const target = event.target as HTMLElement;
+      const isEditableBlock = target.hasAttribute('contenteditable') || 
+                              target.closest('[contenteditable="true"]');
+      
+      if (!isEditableBlock) {
+        return;
+      }
+      
+      // Prevent default context menu
+      event.preventDefault();
+      
+      // Show our custom context menu
+      setContextMenuPosition({
+        top: event.pageY,
+        left: event.pageX
+      });
+      
+      setShowContextMenu(true);
+    };
+    
     // Handle clicks outside the tooltip to close it
     const handleClickOutside = (event: globalThis.MouseEvent) => {
-      if (
-        selectionTooltipRef.current && 
-        !selectionTooltipRef.current.contains(event.target as Node) &&
-        showSelectionTooltip
-      ) {
+      if (selectionTooltipRef.current && 
+          !selectionTooltipRef.current.contains(event.target as Node) &&
+          showSelectionTooltip) {
         setShowSelectionTooltip(false);
+      }
+      
+      if (contextMenuRef.current && 
+          !contextMenuRef.current.contains(event.target as Node) &&
+          showContextMenu) {
+        setShowContextMenu(false);
       }
     };
     
     document.addEventListener('selectionchange', handleTextSelection);
     document.addEventListener('mouseup', handleTextSelection);
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('contextmenu', handleContextMenu);
     
     return () => {
       document.removeEventListener('selectionchange', handleTextSelection);
       document.removeEventListener('mouseup', handleTextSelection);
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [showSelectionTooltip]);
+  }, [showSelectionTooltip, showContextMenu]);
+
+  // Format selected text with the specified formatting
+  const formatSelectedText = (format: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'code' | 'clear' | 
+    'text-red' | 'text-blue' | 'text-green' | 'text-purple' | 
+    'highlight-yellow' | 'highlight-green' | 'highlight-blue' | 'highlight-pink' |
+    'font-size-small' | 'font-size-medium' | 'font-size-large' | 'font-size-xlarge' | 'font-size-xxlarge' | 
+    'font-size-custom' |
+    'font-serif' | 'font-mono' | 'font-cursive' | 'font-sans' | 'font-arial' | 'font-times' | 'font-verdana' | 'font-comic') => {
+    // Get the current selection
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    
+    // Get the range and its contents
+    const range = selection.getRangeAt(0);
+    
+    // Determine what markup to apply
+    let prefix = '';
+    let suffix = '';
+    
+    switch (format) {
+      case 'bold':
+        prefix = '<strong>';
+        suffix = '</strong>';
+        break;
+      case 'italic':
+        prefix = '<em>';
+        suffix = '</em>';
+        break;
+      case 'underline':
+        prefix = '<u>';
+        suffix = '</u>';
+        break;
+      case 'strikethrough':
+        prefix = '<s>';
+        suffix = '</s>';
+        break;
+      case 'code':
+        prefix = '<code>';
+        suffix = '</code>';
+        break;
+      case 'text-red':
+        prefix = '<span style="color: #e53e3e;">';
+        suffix = '</span>';
+        break;
+      case 'text-blue':
+        prefix = '<span style="color: #3182ce;">';
+        suffix = '</span>';
+        break;
+      case 'text-green':
+        prefix = '<span style="color: #38a169;">';
+        suffix = '</span>';
+        break;
+      case 'text-purple':
+        prefix = '<span style="color: #805ad5;">';
+        suffix = '</span>';
+        break;
+      case 'highlight-yellow':
+        prefix = '<span style="background-color: #fefcbf;">';
+        suffix = '</span>';
+        break;
+      case 'highlight-green':
+        prefix = '<span style="background-color: #c6f6d5;">';
+        suffix = '</span>';
+        break;
+      case 'highlight-blue':
+        prefix = '<span style="background-color: #bee3f8;">';
+        suffix = '</span>';
+        break;
+      case 'highlight-pink':
+        prefix = '<span style="background-color: #fed7e2;">';
+        suffix = '</span>';
+        break;
+      // Font Size Options
+      case 'font-size-small':
+        prefix = '<span style="font-size: 0.85em;">';
+        suffix = '</span>';
+        break;
+      case 'font-size-medium':
+        prefix = '<span style="font-size: 1em;">';
+        suffix = '</span>';
+        break;
+      case 'font-size-large':
+        prefix = '<span style="font-size: 1.25em;">';
+        suffix = '</span>';
+        break;
+      case 'font-size-xlarge':
+        prefix = '<span style="font-size: 1.5em;">';
+        suffix = '</span>';
+        break;
+      case 'font-size-xxlarge':
+        prefix = '<span style="font-size: 2em;">';
+        suffix = '</span>';
+        break;
+      case 'font-size-custom':
+        // Get custom font size
+        const size = prompt('Enter font size (in pixels):', '16');
+        if (!size) return; // User cancelled
+        prefix = `<span style="font-size: ${size}px;">`;
+        suffix = '</span>';
+        break;
+      // Font Style Options
+      case 'font-serif':
+        prefix = '<span style="font-family: Georgia, Times, serif;">';
+        suffix = '</span>';
+        break;
+      case 'font-mono':
+        prefix = '<span style="font-family: monospace, Courier, \'Courier New\';">';
+        suffix = '</span>';
+        break;
+      case 'font-cursive':
+        prefix = '<span style="font-family: cursive, \'Brush Script MT\';">';
+        suffix = '</span>';
+        break;
+      case 'font-sans':
+        prefix = '<span style="font-family: \'Helvetica Neue\', Helvetica, Arial, sans-serif;">';
+        suffix = '</span>';
+        break;
+      case 'font-arial':
+        prefix = '<span style="font-family: Arial, sans-serif;">';
+        suffix = '</span>';
+        break;
+      case 'font-times':
+        prefix = '<span style="font-family: \'Times New Roman\', Times, serif;">';
+        suffix = '</span>';
+        break;
+      case 'font-verdana':
+        prefix = '<span style="font-family: Verdana, Geneva, sans-serif;">';
+        suffix = '</span>';
+        break;
+      case 'font-comic':
+        prefix = '<span style="font-family: \'Comic Sans MS\', cursive, sans-serif;">';
+        suffix = '</span>';
+        break;
+      case 'clear':
+        // For clear formatting, we extract just the text content
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(range.cloneContents());
+        const plainText = tempDiv.textContent || "";
+        
+        // Delete the current selection
+        range.deleteContents();
+        
+        // Insert the plain text
+        range.insertNode(document.createTextNode(plainText));
+        
+        // Update the block content
+        if (activeBlock) {
+          const activeElement = blockRefs.current[activeBlock];
+          if (activeElement) {
+            // Trigger the input handler to save the changes
+            const inputEvent = new Event('input', { bubbles: true });
+            activeElement.dispatchEvent(inputEvent);
+          }
+        }
+        
+        // Hide the context menu
+        setShowContextMenu(false);
+        return;
+    }
+    
+    // Extract the content
+    const fragment = range.cloneContents();
+    
+    // Create a temporary container
+    const tempDiv = document.createElement('div');
+    tempDiv.appendChild(fragment);
+    
+    // Get the content to format
+    const content = tempDiv.innerHTML;
+    
+    // Create the new formatted content
+    const formattedContent = `${prefix}${content}${suffix}`;
+    
+    // Delete the current selection
+    range.deleteContents();
+    
+    // Create a temporary element to hold the HTML
+    const temp = document.createElement('div');
+    temp.innerHTML = formattedContent;
+    
+    // Insert each child node
+    const fragment2 = document.createDocumentFragment();
+    while (temp.firstChild) {
+      fragment2.appendChild(temp.firstChild);
+    }
+    
+    // Insert the formatted content
+    range.insertNode(fragment2);
+    
+    // Update the block content
+    if (activeBlock) {
+      const activeElement = blockRefs.current[activeBlock];
+      if (activeElement) {
+        // Trigger the input handler to save the changes
+        const inputEvent = new Event('input', { bubbles: true });
+        activeElement.dispatchEvent(inputEvent);
+      }
+    }
+    
+    // Hide the context menu
+    setShowContextMenu(false);
+  };
 
   // Add this helper function near the top of the component
   const formatSubjectName = (subjectId: string): string => {
@@ -1421,6 +1665,101 @@ The notes will be saved in a note-taking application, so make them well-organize
           })}
         </div>
         
+        {/* Embedded AI Assistant Chat Section */}
+        {inPageMessages.length > 0 && (
+          <div 
+            style={{
+              marginTop: '40px',
+              marginBottom: '40px',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              overflow: 'hidden'
+            }}
+          >
+            <div style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--border-color)',
+              backgroundColor: 'var(--bg-secondary)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ fontWeight: '600', fontSize: '14px' }}>AI Assistant</div>
+              <button
+                onClick={() => setInPageMessages([])}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-tertiary)'
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div 
+              ref={inPageChatRef}
+              style={{
+                padding: '16px',
+                maxHeight: '400px',
+                overflowY: 'auto',
+                backgroundColor: 'var(--bg-primary)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}
+            >
+              {inPageMessages.map(message => (
+                <div
+                  key={message.id}
+                  style={{
+                    backgroundColor: message.sender === 'ai' ? 'var(--bg-tertiary)' : 'var(--highlight-bg)',
+                    color: 'var(--text-primary)',
+                    alignSelf: message.sender === 'ai' ? 'flex-start' : 'flex-end',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    maxWidth: message.sender === 'ai' ? '90%' : '80%',
+                    wordBreak: 'break-word',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                  }}
+                >
+                  {message.text}
+                </div>
+              ))}
+              
+              {isInPageLoading && (
+                <div 
+                  style={{
+                    alignSelf: 'flex-start',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <div className="animate-spin">⏳</div>
+                  <span>Thinking...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* Last edited info */}
+        <div style={{
+          fontSize: '13px',
+          color: 'var(--text-tertiary)',
+          marginTop: '32px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px'
+        }}>
+          Last edited now
+        </div>
+        
         {/* Selection tooltip */}
         {showSelectionTooltip && (
           <div 
@@ -1474,6 +1813,547 @@ The notes will be saved in a note-taking application, so make them well-organize
             >
               <X size={14} />
             </button>
+          </div>
+        )}
+        
+        {/* Text Formatting Context Menu */}
+        {showContextMenu && (
+          <div 
+            ref={contextMenuRef}
+            style={{
+              position: 'absolute',
+              top: `${contextMenuPosition.top}px`,
+              left: `${contextMenuPosition.left}px`,
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+              padding: '8px',
+              zIndex: 9999,
+              minWidth: '220px'
+            }}
+          >
+            <div style={{
+              padding: '4px 8px',
+              fontSize: '13px',
+              color: 'var(--text-tertiary)',
+              fontWeight: '500',
+              marginBottom: '4px'
+            }}>
+              FORMAT TEXT
+            </div>
+            
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px'
+            }}>
+              <button
+                onClick={() => formatSelectedText('bold')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  textAlign: 'left',
+                  fontSize: '14px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <Bold size={16} /> <strong>Bold</strong>
+              </button>
+              
+              <button
+                onClick={() => formatSelectedText('italic')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  textAlign: 'left',
+                  fontSize: '14px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <Italic size={16} /> <em>Italic</em>
+              </button>
+              
+              <button
+                onClick={() => formatSelectedText('underline')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  textAlign: 'left',
+                  fontSize: '14px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <Underline size={16} /> <u>Underline</u>
+              </button>
+              
+              <button
+                onClick={() => formatSelectedText('code')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  textAlign: 'left',
+                  fontSize: '14px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <Code size={16} /> <code>Code</code>
+              </button>
+              
+              {/* Font Size Section */}
+              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+              <div style={{
+                padding: '4px 8px',
+                fontSize: '13px',
+                color: 'var(--text-tertiary)',
+                fontWeight: '500',
+                marginBottom: '2px'
+              }}>
+                FONT SIZE
+              </div>
+              
+              <div style={{ display: 'flex', padding: '4px 12px', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => formatSelectedText('font-size-small')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Small (0.85em)"
+                >
+                  Small
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-size-medium')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Medium (1em)"
+                >
+                  Medium
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-size-large')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontSize: '15px',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Large (1.25em)"
+                >
+                  Large
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-size-xlarge')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Extra Large (1.5em)"
+                >
+                  XL
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-size-xxlarge')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontSize: '18px',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="XX Large (2em)"
+                >
+                  XXL
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-size-custom')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                  title="Custom Size (in pixels)"
+                >
+                  Custom...
+                </button>
+              </div>
+              
+              {/* Font Style Section */}
+              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+              <div style={{
+                padding: '4px 8px',
+                fontSize: '13px',
+                color: 'var(--text-tertiary)',
+                fontWeight: '500',
+                marginBottom: '2px'
+              }}>
+                FONT STYLE
+              </div>
+              
+              <div style={{ display: 'flex', padding: '4px 12px', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => formatSelectedText('font-sans')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: 'Helvetica, Arial, sans-serif',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Sans Serif Font"
+                >
+                  Sans-serif
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-serif')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: 'Georgia, serif',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Serif Font"
+                >
+                  Serif
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-mono')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: 'monospace',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Monospace Font"
+                >
+                  Monospace
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-cursive')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: 'cursive',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Cursive Font"
+                >
+                  Cursive
+                </button>
+              </div>
+              <div style={{ display: 'flex', padding: '4px 12px 8px', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => formatSelectedText('font-arial')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: 'Arial, sans-serif',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Arial Font"
+                >
+                  Arial
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-times')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: '"Times New Roman", Times, serif',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Times New Roman Font"
+                >
+                  Times
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-verdana')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: 'Verdana, Geneva, sans-serif',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Verdana Font"
+                >
+                  Verdana
+                </button>
+                <button
+                  onClick={() => formatSelectedText('font-comic')}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'transparent',
+                    fontFamily: '"Comic Sans MS", cursive, sans-serif',
+                    cursor: 'pointer',
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Comic Sans MS Font"
+                >
+                  Comic Sans
+                </button>
+              </div>
+              
+              {/* Text Colors Section */}
+              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+              <div style={{
+                padding: '4px 8px',
+                fontSize: '13px',
+                color: 'var(--text-tertiary)',
+                fontWeight: '500',
+                marginBottom: '2px'
+              }}>
+                TEXT COLOR
+              </div>
+              
+              <div style={{ display: 'flex', padding: '8px 12px', gap: '10px' }}>
+                <button
+                  onClick={() => formatSelectedText('text-red')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#e53e3e',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Red"
+                />
+                <button
+                  onClick={() => formatSelectedText('text-blue')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#3182ce',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Blue"
+                />
+                <button
+                  onClick={() => formatSelectedText('text-green')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#38a169',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Green"
+                />
+                <button
+                  onClick={() => formatSelectedText('text-purple')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#805ad5',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Purple"
+                />
+              </div>
+              
+              {/* Highlight Colors Section */}
+              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+              <div style={{
+                padding: '4px 8px',
+                fontSize: '13px',
+                color: 'var(--text-tertiary)',
+                fontWeight: '500',
+                marginBottom: '2px'
+              }}>
+                HIGHLIGHT
+              </div>
+              
+              <div style={{ display: 'flex', padding: '8px 12px', gap: '10px' }}>
+                <button
+                  onClick={() => formatSelectedText('highlight-yellow')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#fefcbf',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Yellow Highlight"
+                />
+                <button
+                  onClick={() => formatSelectedText('highlight-green')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#c6f6d5',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Green Highlight"
+                />
+                <button
+                  onClick={() => formatSelectedText('highlight-blue')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#bee3f8',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Blue Highlight"
+                />
+                <button
+                  onClick={() => formatSelectedText('highlight-pink')}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    backgroundColor: '#fed7e2',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                  }}
+                  title="Pink Highlight"
+                />
+              </div>
+              
+              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+              
+              <button
+                onClick={() => formatSelectedText('clear')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  textAlign: 'left',
+                  fontSize: '14px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                <X size={16} /> Clear Formatting
+              </button>
+            </div>
           </div>
         )}
         
@@ -1535,123 +2415,22 @@ The notes will be saved in a note-taking application, so make them well-organize
             ))}
           </div>
         )}
-        
-        {/* Last edited info */}
-        <div style={{
-          fontSize: '13px',
-          color: 'var(--text-tertiary)',
-          marginTop: '32px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px'
-        }}>
-          Last edited now
-        </div>
-        
-        {/* In-page Chat Container */}
-        {inPageMessages.length > 0 && (
-          <div 
-            style={{
-              position: 'fixed',
-              bottom: '80px', // Position above the floating input
-              right: '20px',
-              width: '400px',
-              maxHeight: '50vh',
-              backgroundColor: 'var(--bg-primary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '12px',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              zIndex: 39
-            }}
-          >
-            <div style={{
-              padding: '12px 16px',
-              borderBottom: '1px solid var(--border-color)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div style={{ fontWeight: '600', fontSize: '14px' }}>AI Assistant</div>
-              <button
-                onClick={() => setInPageMessages([])}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--text-tertiary)'
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            
-            <div 
-              ref={inPageChatRef}
-              style={{
-                padding: '16px',
-                overflowY: 'auto',
-                maxHeight: 'calc(50vh - 54px)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px'
-              }}
-            >
-              {inPageMessages.map(message => (
-                <div
-                  key={message.id}
-                  style={{
-                    backgroundColor: message.sender === 'ai' ? 'var(--bg-tertiary)' : 'var(--highlight-bg)',
-                    color: 'var(--text-primary)',
-                    alignSelf: message.sender === 'ai' ? 'flex-start' : 'flex-end',
-                    padding: message.sender === 'ai' ? '12px 16px' : '12px 16px',
-                    borderRadius: '12px',
-                    maxWidth: message.sender === 'ai' ? '95%' : '80%',
-                    wordBreak: 'break-word',
-                    boxShadow: message.sender === 'ai' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none'
-                  }}
-                >
-                  {message.text}
-                </div>
-              ))}
-              
-              {isInPageLoading && (
-                <div 
-                  style={{
-                    alignSelf: 'flex-start',
-                    backgroundColor: 'var(--bg-tertiary)',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  <PiSpinnerGap size={16} className="animate-spin" />
-                  <span>Thinking...</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        
-        {/* Debug info */}
-        <div style={{
-          position: 'fixed',
-          bottom: '10px',
-          right: '10px',
-          backgroundColor: 'rgba(0,0,0,0.8)',
-          color: 'white',
-          padding: '8px 12px',
-          borderRadius: '4px',
-          fontSize: '12px',
-          zIndex: 9999,
-          pointerEvents: 'none'
-        }}>
-          {debugInfo || 'Waiting for selection...'}
-        </div>
+      </div>
+      
+      {/* Debug info */}
+      <div style={{
+        position: 'fixed',
+        bottom: '10px',
+        right: '10px',
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        color: 'white',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        zIndex: 9999,
+        pointerEvents: 'none'
+      }}>
+        {debugInfo || 'Waiting for selection...'}
       </div>
       
       {/* Global CSS for placeholders and formatted content */}
