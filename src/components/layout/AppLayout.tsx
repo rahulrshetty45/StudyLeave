@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import AITutor from './AITutor';
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
-import { Moon, Sun, LogOut } from 'lucide-react';
+import { Moon, Sun, LogOut, Send } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
@@ -21,6 +21,8 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
   const isDarkMode = theme === 'dark';
   const [aiTutorWidth, setAiTutorWidth] = useState(320);
   const [aiTutorExpanded, setAiTutorExpanded] = useState(true);
+  // Add state for the global chat input
+  const [chatInput, setChatInput] = useState('');
   
   // Listen for changes to the AI tutor width in localStorage
   useEffect(() => {
@@ -71,6 +73,73 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
     router.push('/login');
   };
 
+  // Function to send a message to the AI Tutor
+  const sendMessageToAITutor = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!chatInput.trim()) {
+      return;
+    }
+    
+    // Get current route for context
+    const pathname = window.location.pathname;
+    let context = pathname;
+    
+    // Extract subject and note from path if available
+    const pathParts = pathname.split('/');
+    if (pathParts.length >= 3 && pathParts[1] === 'subjects') {
+      const subject = pathParts[2] || '';
+      const note = pathParts.length >= 4 ? pathParts[3] : '';
+      
+      // Format the context string
+      context = subject 
+        ? (note ? `${subject} - ${note.replace(/-/g, ' ')}` : subject.replace(/-/g, ' '))
+        : 'general';
+    }
+    
+    // Create message payload
+    const messageData = {
+      message: chatInput,
+      context: context,
+      timestamp: Date.now()
+    };
+    
+    // Check if we're on a note page - if so, send to in-page chat instead of AI Tutor
+    const isNotePage = pathParts.length >= 4 && pathParts[1] === 'subjects' && pathParts[3];
+    
+    if (isNotePage) {
+      try {
+        // Dispatch event for the in-page chat to handle
+        const event = new CustomEvent('inPageMessage', { detail: messageData });
+        window.dispatchEvent(event);
+        console.log("Sent message to in-page chat:", messageData);
+      } catch (error) {
+        console.error("Failed to send message to in-page chat:", error);
+      }
+    } else {
+      // Otherwise send to AI Tutor as before
+      try {
+        // Expand the AI Tutor if it's collapsed
+        localStorage.setItem('aiTutorExpanded', 'true');
+        setAiTutorExpanded(true);
+        
+        // Dispatch the event to the AI Tutor
+        const event = new CustomEvent('sendMessage', { detail: messageData });
+        window.dispatchEvent(event);
+        console.log("Sent message to AI Tutor via event:", messageData);
+      } catch (error) {
+        console.error("Failed to send message via event:", error);
+        
+        // Fallback: Store in localStorage for AITutor to pick up
+        localStorage.setItem('pendingQuestion', JSON.stringify(messageData));
+        console.log("Stored message in localStorage for AI Tutor to pick up");
+      }
+    }
+    
+    // Clear input
+    setChatInput('');
+  };
+
   return (
     <div style={{
       display: 'flex',
@@ -97,6 +166,16 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
         .main-content::-webkit-scrollbar-thumb {
           background: var(--border-color);
           border-radius: 4px;
+        }
+        
+        /* Animation for the chat input */
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px) translateX(-50%); }
+          to { opacity: 1; transform: translateY(0) translateX(-50%); }
+        }
+        
+        .floating-chat-input {
+          animation: fadeIn 0.3s ease-in-out;
         }
       `}</style>
       
@@ -240,6 +319,68 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
         }}>
           {children}
         </main>
+      </div>
+      
+      {/* Floating Chat Input at bottom center */}
+      <div className="floating-chat-input" style={{
+        position: 'fixed',
+        bottom: '24px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: '100%',
+        maxWidth: '600px',
+        padding: '0 20px',
+        zIndex: 40,
+        // Adjust left position to account for sidebar and AI tutor
+        marginLeft: aiTutorExpanded ? `-${aiTutorWidth / 2}px` : '0'
+      }}>
+        <form 
+          onSubmit={sendMessageToAITutor}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: 'var(--bg-primary)',
+            borderRadius: '12px',
+            padding: '8px 12px',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+            border: '1px solid var(--border-color)'
+          }}
+        >
+          <input
+            type="text"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder="Ask your AI tutor..."
+            style={{
+              flex: 1,
+              border: 'none',
+              backgroundColor: 'transparent',
+              padding: '10px 16px',
+              borderRadius: '8px',
+              outline: 'none',
+              color: 'var(--text-primary)',
+              fontSize: '14px'
+            }}
+          />
+          <button
+            type="submit"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '40px',
+              height: '40px',
+              backgroundColor: 'var(--highlight-color)',
+              color: 'white',
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            <Send size={16} />
+          </button>
+        </form>
       </div>
       
       {/* Right Sidebar - AI Tutor */}

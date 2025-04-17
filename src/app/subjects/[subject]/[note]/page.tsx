@@ -27,7 +27,8 @@ import {
   Minus,
   Sparkles,
   HelpCircle,
-  Check
+  Check,
+  Send
 } from 'lucide-react';
 import { generateAIResponse, Message } from '@/lib/openai';
 import { FaArrowLeft, FaLink, FaRegTrashAlt, FaSave, FaImage, FaCode, FaParagraph, FaListUl, FaHeading, FaQuoteLeft, FaStar, FaMarkdown, FaClipboard, FaTimes } from 'react-icons/fa';
@@ -88,6 +89,11 @@ export default function NotePage() {
   
   // Keep the isExplaining state since it's still needed for button state
   const [isExplaining, setIsExplaining] = useState<boolean>(false);
+  
+  // Add state for in-page chat messages
+  const [inPageMessages, setInPageMessages] = useState<{id: number, text: string, sender: 'user' | 'ai'}[]>([]);
+  const [isInPageLoading, setIsInPageLoading] = useState<boolean>(false);
+  const inPageChatRef = useRef<HTMLDivElement>(null);
   
   // Initialize title and blocks from localStorage or defaults
   useEffect(() => {
@@ -1111,6 +1117,96 @@ The notes will be saved in a note-taking application, so make them well-organize
       .join(' ');
   };
 
+  // Add a handler for the in-page AI chat messages
+  useEffect(() => {
+    // Define a handler for messages coming from the global chat input
+    const handleInPageMessage = (event: CustomEvent<{ message: string, context: string, timestamp: number }>) => {
+      console.log("Received in-page message:", event.detail);
+      const { message } = event.detail;
+      
+      // Add the user message to chat
+      const userMessage = {
+        id: Date.now(),
+        text: message,
+        sender: 'user' as const
+      };
+      
+      setInPageMessages(prev => [...prev, userMessage]);
+      
+      // Generate AI response
+      generateInPageResponse(message);
+    };
+    
+    // Listen for the custom event
+    window.addEventListener('inPageMessage', handleInPageMessage as EventListener);
+    
+    // Scroll to bottom when messages change
+    if (inPageChatRef.current) {
+      inPageChatRef.current.scrollTop = inPageChatRef.current.scrollHeight;
+    }
+    
+    return () => {
+      window.removeEventListener('inPageMessage', handleInPageMessage as EventListener);
+    };
+  }, [inPageMessages]); // Depend on inPageMessages to scroll to bottom on new messages
+  
+  // Function to generate AI response for in-page chat
+  const generateInPageResponse = async (userMessage: string) => {
+    try {
+      setIsInPageLoading(true);
+      
+      // Format context for better responses
+      const formattedSubjectName = formatSubjectName(subject);
+      const noteContext = `Note: "${title}" in subject "${formattedSubjectName}"`;
+      
+      // Create a system message that gives context about the note
+      const systemMessage: Message = {
+        role: 'system',
+        content: `You are a helpful AI assistant answering questions about ${noteContext}. 
+        Be concise, accurate, and conversational in your responses. Format your answers with markdown when appropriate.
+        Focus on providing information relevant to the current note content.`
+      };
+      
+      // Create the user message
+      const apiUserMessage = {
+        role: 'user',
+        content: userMessage
+      };
+      
+      // Generate response
+      const aiResponse = await generateAIResponse([systemMessage, apiUserMessage]);
+      
+      // Add AI response to messages
+      const responseMessage = {
+        id: Date.now(),
+        text: aiResponse || "I'm sorry, I couldn't generate a response.",
+        sender: 'ai' as const
+      };
+      
+      setInPageMessages(prev => [...prev, responseMessage]);
+    } catch (error) {
+      console.error('Error generating in-page response:', error);
+      
+      // Add error message
+      const errorMessage = {
+        id: Date.now(),
+        text: "I'm sorry, I encountered an error while trying to respond.",
+        sender: 'ai' as const
+      };
+      
+      setInPageMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsInPageLoading(false);
+      
+      // Scroll to bottom after a short delay to ensure the message is rendered
+      setTimeout(() => {
+        if (inPageChatRef.current) {
+          inPageChatRef.current.scrollTop = inPageChatRef.current.scrollHeight;
+        }
+      }, 100);
+    }
+  };
+
   return (
     <AppLayout>
       <div style={{
@@ -1452,6 +1548,95 @@ The notes will be saved in a note-taking application, so make them well-organize
           Last edited now
         </div>
         
+        {/* In-page Chat Container */}
+        {inPageMessages.length > 0 && (
+          <div 
+            style={{
+              position: 'fixed',
+              bottom: '80px', // Position above the floating input
+              right: '20px',
+              width: '400px',
+              maxHeight: '50vh',
+              backgroundColor: 'var(--bg-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 39
+            }}
+          >
+            <div style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--border-color)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ fontWeight: '600', fontSize: '14px' }}>AI Assistant</div>
+              <button
+                onClick={() => setInPageMessages([])}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-tertiary)'
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div 
+              ref={inPageChatRef}
+              style={{
+                padding: '16px',
+                overflowY: 'auto',
+                maxHeight: 'calc(50vh - 54px)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}
+            >
+              {inPageMessages.map(message => (
+                <div
+                  key={message.id}
+                  style={{
+                    backgroundColor: message.sender === 'ai' ? 'var(--bg-tertiary)' : 'var(--highlight-bg)',
+                    color: 'var(--text-primary)',
+                    alignSelf: message.sender === 'ai' ? 'flex-start' : 'flex-end',
+                    padding: message.sender === 'ai' ? '12px 16px' : '12px 16px',
+                    borderRadius: '12px',
+                    maxWidth: message.sender === 'ai' ? '95%' : '80%',
+                    wordBreak: 'break-word',
+                    boxShadow: message.sender === 'ai' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none'
+                  }}
+                >
+                  {message.text}
+                </div>
+              ))}
+              
+              {isInPageLoading && (
+                <div 
+                  style={{
+                    alignSelf: 'flex-start',
+                    backgroundColor: 'var(--bg-tertiary)',
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <PiSpinnerGap size={16} className="animate-spin" />
+                  <span>Thinking...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         {/* Debug info */}
         <div style={{
           position: 'fixed',
@@ -1549,6 +1734,10 @@ The notes will be saved in a note-taking application, so make them well-organize
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(-10px) translateX(-50%); }
           to { opacity: 1; transform: translateY(0) translateX(-50%); }
+        }
+        
+        .fixed.bottom-8 {
+          animation: fadeIn 0.3s ease-in-out;
         }
       `}</style>
     </AppLayout>

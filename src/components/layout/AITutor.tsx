@@ -1220,279 +1220,305 @@ export default function AITutor() {
     return { isCreationRequest: false, subjectName: '' };
   };
 
-  // Memoize the handleSendMessageWithText function to avoid recreating it on every render
-  const handleSendMessageWithText = React.useCallback(async (text: string) => {
-    console.log("Sending message to AI:", text);
-    if (!text.trim() || isLoading) return;
-
-    setIsLoading(true);
-    
-    try {
-      // We need to get the current messages state to ensure we have the latest
-      let currentMessages = [...messages];
-      
-      // Format messages for OpenAI API
-      const formattedMessages = currentMessages.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'assistant',
-        content: msg.text
-      }));
-
-      // Add the new user message
-      formattedMessages.push({
-        role: 'user',
-        content: text
-      });
-
-      // Create a system message focused on explaining text
-      const systemMessage = {
-        role: 'system',
-        content: `You are a helpful AI tutor assisting a student with their studies. The student has selected text from their notes and wants you to explain it in detail. 
-        
-        Provide a clear, educational explanation of the selected text. Break down complex concepts, provide examples if helpful, and ensure your explanation is accurate and informative.
-        
-        Focus specifically on explaining the text they've selected - be thorough but concise. If the text contains technical terms, define them.`
-      };
-      
-      formattedMessages.unshift(systemMessage);
-
-      // Show temporary loading message
-      const loadingId = Date.now();
-      setMessages(prevMsgs => {
-        const updatedMessages = [...prevMsgs, { 
-          id: loadingId, 
-          text: "Thinking...", 
-          sender: 'ai' as const
-        }];
-        // Save messages immediately
-        localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
-        return updatedMessages;
-      });
-
-      console.log("Sending request to AI API");
-      // Generate AI response
-      const aiResponse = await generateAIResponse(formattedMessages);
-      console.log("Response received from AI");
-      
-      // Remove the loading message and add the real response
-      setMessages(prevMsgs => {
-        const filteredMsgs = prevMsgs.filter(m => m.id !== loadingId);
-        const updatedMessages = [...filteredMsgs, { 
-          id: Date.now(), 
-          text: aiResponse || "I'm sorry, I couldn't generate a response.", 
-          sender: 'ai' as const
-        }];
-        // Save messages immediately
-        localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
-        return updatedMessages;
-      });
-    } catch (error) {
-      console.error('Error explaining text:', error);
-      setMessages(prevMsgs => {
-        const filteredMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
-        const updatedMessages = [...filteredMsgs, { 
-          id: Date.now(), 
-          text: "I'm sorry, I encountered an error while trying to explain the text.", 
-          sender: 'ai' as const
-        }];
-        // Save messages immediately
-        localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
-        return updatedMessages;
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, messages, setMessages]);
-
-  // Handle explain text event from notes page
+  // Add a function to handle messages from the notes page
   useEffect(() => {
-    console.log("Setting up explainText event listener");
-    
-    const handleExplainText = (event: CustomEvent<{ text: string, source: string }>) => {
-      const { text, source } = event.detail;
+    const handleMessageFromNotes = (event: CustomEvent<{ message: string, context: string, timestamp: number }>) => {
+      console.log("Received message from notes page:", event.detail);
+      const { message, context } = event.detail;
       
-      if (!text || text.length === 0) {
+      if (!message || message.trim() === '') {
+        return;
+      }
+      
+      // Force expand the AI Tutor
+      setExpanded(true);
+      
+      // Add the message with context to the chat
+      const formattedMessage = `${message}\n\nContext: ${context}`;
+      
+      // Add the user message to the chat
+      handleSendMessageWithText(formattedMessage);
+    };
+    
+    // Add handler for explanation requests
+    const handleExplainText = (event: CustomEvent<{ text: string, source: string, id: number }>) => {
+      console.log("Received explanation request:", event.detail);
+      const { text, source, id } = event.detail;
+      
+      if (!text || text.trim() === '') {
+        console.log("Empty text to explain, ignoring request");
         return;
       }
       
       // Check if we're already explaining this text
       if (messageManager.current.isExplaining(text)) {
-        console.log("Already explaining this text - skipping duplicate request");
+        console.log("Already explaining this text, ignoring duplicate request");
         return;
       }
-      
-      console.log("Processing explanation request for:", text.substring(0, 30) + "...");
       
       // Force expand the AI Tutor
       setExpanded(true);
       
-      // Format the question
-      const question = `Please explain this text that I selected from my notes on ${source}:\n\n"${text}"`;
+      // Create a system message that explains what to do
+      const systemMessage = {
+        role: 'system',
+        content: `You are an expert tutor explaining the following text from ${source}. Explain the concept clearly, provide additional context, and break down complex ideas. Be educational and comprehensive but concise.`
+      };
       
-      // Generate a unique ID for this request
-      const requestId = Date.now();
+      // Create the text to explain
+      const userMessage: Message = {
+        id: Date.now(),
+        text: `Please explain this text: "${text}"`,
+        sender: 'user'
+      };
       
-      // Add ONLY the user message first - no thinking message yet
+      // Set loading state and add user message
+      setIsLoading(true);
       setMessages(prev => {
-        // Check if we already have this exact question
-        if (prev.some(msg => msg.sender === 'user' && msg.text === question)) {
-          console.log("This exact question is already in the chat - skipping");
-          return prev;
-        }
-        
-        const updatedMessages = [
-          ...prev, 
-          { 
-            id: requestId, 
-            text: question, 
-            sender: 'user' as const
-          }
-        ];
-        
+        const updatedMessages = [...prev, userMessage];
         localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
         return updatedMessages;
       });
       
-      // Start explaining and get the loading message ID
-      const loadingId = messageManager.current.startExplaining(text);
+      // Mark that we're explaining this text
+      messageManager.current.startExplaining(text);
       
-      // Short timeout to ensure the user message is added first
-      setTimeout(() => {
-        // Now add the thinking message in a separate update
-        setMessages(prev => {
-          // Skip if a thinking message already exists
-          if (prev.some(msg => msg.sender === 'ai' && msg.text === "Thinking...")) {
-            return prev;
-          }
-          
-          const updatedMessages = [
-            ...prev,
-            { 
+      // Generate AI response
+      setTimeout(async () => {
+        try {
+          // Add a loading message
+          const loadingId = Date.now();
+          setMessages(prevMsgs => {
+            const withoutLoadingMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
+            const updatedMessages = [...withoutLoadingMsgs, { 
               id: loadingId, 
               text: "Thinking...", 
               sender: 'ai' as const
-            }
+            }];
+            localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+            return updatedMessages;
+          });
+          
+          // Prepare messages for API call
+          const formattedMessages = [
+            systemMessage,
+            { role: 'user', content: `Please explain this text: "${text}"` }
           ];
+          
+          // Generate explanation
+          const explanation = await generateAIResponse(formattedMessages);
+          
+          // Remove loading message and add explanation
+          setMessages(prevMsgs => {
+            const filteredMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
+            const updatedMessages = [...filteredMsgs, { 
+              id: Date.now(), 
+              text: explanation || "I'm sorry, I couldn't generate an explanation.", 
+              sender: 'ai' as const
+            }];
+            localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+            return updatedMessages;
+          });
+        } catch (error) {
+          console.error('Error generating explanation:', error);
+          setMessages(prevMsgs => {
+            const filteredMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
+            const updatedMessages = [...filteredMsgs, { 
+              id: Date.now(), 
+              text: "I'm sorry, I encountered an error while trying to generate an explanation.", 
+              sender: 'ai' as const
+            }];
+            localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+            return updatedMessages;
+          });
+        } finally {
+          setIsLoading(false);
+          messageManager.current.finishExplaining();
+        }
+      }, 100);
+    };
+    
+    // Register the event listeners
+    window.addEventListener('sendMessage', handleMessageFromNotes as EventListener);
+    window.addEventListener('explainText', handleExplainText as EventListener);
+    
+    // Check localStorage for pending questions
+    const checkPendingQuestions = () => {
+      const pendingQuestionJson = localStorage.getItem('pendingQuestion');
+      if (pendingQuestionJson) {
+        try {
+          const pendingQuestion = JSON.parse(pendingQuestionJson);
+          
+          // Only process recent questions (within the last 2 minutes)
+          if (Date.now() - pendingQuestion.timestamp < 120000) {
+            console.log("Found pending question in localStorage");
+            
+            // Format the message with context
+            const formattedMessage = `${pendingQuestion.message}\n\nContext: ${pendingQuestion.context}`;
+            
+            // Force expand the AI Tutor
+            setExpanded(true);
+            
+            // Add the message to the chat
+            handleSendMessageWithText(formattedMessage);
+          }
+          
+          // Clear the pending question
+          localStorage.removeItem('pendingQuestion');
+        } catch (error) {
+          console.error("Error processing pending question:", error);
+          localStorage.removeItem('pendingQuestion');
+        }
+      }
+      
+      // Check for pending explanations
+      const pendingExplanationJson = localStorage.getItem('pendingExplanation');
+      if (pendingExplanationJson) {
+        try {
+          const pendingExplanation = JSON.parse(pendingExplanationJson);
+          
+          // Only process recent explanations (within the last 2 minutes)
+          if (Date.now() - pendingExplanation.timestamp < 120000) {
+            console.log("Found pending explanation in localStorage");
+            
+            // Create a synthetic event to handle with the same logic
+            const syntheticEvent = new CustomEvent('explainText', {
+              detail: {
+                text: pendingExplanation.text,
+                source: pendingExplanation.source,
+                id: pendingExplanation.id || Date.now()
+              }
+            });
+            
+            // Process the explanation
+            handleExplainText(syntheticEvent);
+          }
+          
+          // Clear the pending explanation
+          localStorage.removeItem('pendingExplanation');
+        } catch (error) {
+          console.error("Error processing pending explanation:", error);
+          localStorage.removeItem('pendingExplanation');
+        }
+      }
+    };
+    
+    // Check for pending questions once on mount
+    checkPendingQuestions();
+    
+    return () => {
+      window.removeEventListener('sendMessage', handleMessageFromNotes as EventListener);
+      window.removeEventListener('explainText', handleExplainText as EventListener);
+    };
+  }, []);
+
+  // Add a helper function to send a message programmatically
+  const handleSendMessageWithText = (text: string) => {
+    if (!text.trim() || isLoading) return;
+    
+    // Add the user message
+    const userMessage: Message = {
+      id: Date.now(),
+      text: text,
+      sender: 'user'
+    };
+    
+    // Set loading state and add user message
+    setIsLoading(true);
+    setMessages(prev => {
+      const updatedMessages = [...prev, userMessage];
+      localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+      return updatedMessages;
+    });
+    
+    // Process the message to detect note generation requests
+    const { isRequest, subject, targetSubject } = isNoteGenerationRequest(text);
+    
+    // Generate AI response
+    setTimeout(async () => {
+      try {
+        // Format messages for OpenAI API
+        const formattedMessages = [...messages, userMessage].map(msg => ({
+          role: msg.sender === 'user' ? 'user' : 'assistant',
+          content: msg.text
+        }));
+        
+        // Add system message for context
+        formattedMessages.unshift({
+          role: 'system',
+          content: `You are a helpful AI tutor assisting a student with their studies. Be concise but thorough in your explanations. Format your responses with markdown for better readability.`
+        });
+        
+        // Show temporary loading message
+        const loadingId = Date.now();
+        setMessages(prevMsgs => {
+          // First, remove any existing "Thinking..." messages to prevent duplicates
+          const withoutLoadingMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
+          
+          // Add exactly one loading message
+          const updatedMessages = [...withoutLoadingMsgs, { 
+            id: loadingId, 
+            text: "Thinking...", 
+            sender: 'ai' as const
+          }];
           
           localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
           return updatedMessages;
         });
         
-        // Generate the AI response
-        generateAIResponse([
-          {
-            role: 'system',
-            content: `You are a helpful AI tutor assisting a student with their studies. The student has selected text from their notes and wants you to explain it in detail. 
-            
-            Provide a clear, educational explanation of the selected text. Break down complex concepts, provide examples if helpful, and ensure your explanation is accurate and informative.
-            
-            Focus specifically on explaining the text they've selected - be thorough but concise. If the text contains technical terms, define them.`
-          },
-          {
-            role: 'user',
-            content: question
-          }
-        ]).then(aiResponse => {
-          console.log("Response received from AI");
-          
-          // Replace ALL thinking messages with the actual response
-          setMessages(prevMsgs => {
-            // Remove all thinking messages
-            const filteredMsgs = prevMsgs.filter(m => m.text !== "Thinking...");
-            
-            const updatedMessages = [...filteredMsgs, { 
-              id: Date.now(), 
-              text: aiResponse || "I'm sorry, I couldn't generate a response.", 
-              sender: 'ai' as const
-            }];
-            
-            localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
-            return updatedMessages;
-          });
-        }).catch(error => {
-          console.error('Error generating explanation:', error);
-          
-          // Replace ALL thinking messages with error message
-          setMessages(prevMsgs => {
-            // Remove all thinking messages
-            const filteredMsgs = prevMsgs.filter(m => m.text !== "Thinking...");
-            
-            const updatedMessages = [...filteredMsgs, { 
-              id: Date.now(), 
-              text: "I'm sorry, I encountered an error while trying to explain the text.", 
-              sender: 'ai' as const
-            }];
-            
-            localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
-            return updatedMessages;
-          });
-        }).finally(() => {
-          // Clear the explaining state
-          messageManager.current.finishExplaining();
-          setIsLoading(false);
+        // Generate response
+        const aiResponse = await generateAIResponse(formattedMessages);
+        
+        // Remove all loading messages and add the real response
+        setMessages(prevMsgs => {
+          // Remove ALL thinking messages, not just the one with the specific loadingId
+          const filteredMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
+          const updatedMessages = [...filteredMsgs, { 
+            id: Date.now(), 
+            text: aiResponse || "I'm sorry, I couldn't generate a response.", 
+            sender: 'ai' as const
+          }];
+          localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+          return updatedMessages;
         });
-      }, 50);
-    };
-    
-    // Add event listener to window only
-    window.addEventListener('explainText', handleExplainText as EventListener);
-    console.log("Event listener added for explainText");
-    
-    // Clean up event listener
-    return () => {
-      console.log("Removing explainText event listener");
-      window.removeEventListener('explainText', handleExplainText as EventListener);
-    };
-  }, [setMessages]);
-
-  // Replace the existing pendingExplanation processor with a simpler version
-  useEffect(() => {
-    const checkPendingExplanation = () => {
-      try {
-        const pendingExplanationJson = localStorage.getItem('pendingExplanation');
-        if (pendingExplanationJson) {
-          const pendingExplanation = JSON.parse(pendingExplanationJson);
-          
-          // Only process if it's recent and we're not already explaining something
-          const isRecent = Date.now() - pendingExplanation.timestamp < 10000; // 10 seconds
-          
-          if (isRecent && !messageManager.current.isExplaining(pendingExplanation.text)) {
-            // Dispatch to the event handler
-            const event = new CustomEvent('explainText', {
-              detail: {
-                text: pendingExplanation.text,
-                source: pendingExplanation.source
-              }
-            });
-            
-            window.dispatchEvent(event);
-          }
-          
-          // Remove regardless of whether we processed it
-          localStorage.removeItem('pendingExplanation');
+        
+        // If this was a note generation request, set the generated note
+        if (isRequest) {
+          setGeneratedNote({
+            title: subject.charAt(0).toUpperCase() + subject.slice(1),
+            content: aiResponse,
+            subject: subject,
+            targetSubject: targetSubject
+          });
         }
       } catch (error) {
-        console.error('Error processing pending explanation:', error);
-        localStorage.removeItem('pendingExplanation');
+        console.error('Error generating response:', error);
+        setMessages(prevMsgs => {
+          // Remove ALL thinking messages
+          const filteredMsgs = prevMsgs.filter(m => m.sender !== 'ai' || m.text !== "Thinking...");
+          const updatedMessages = [...filteredMsgs, { 
+            id: Date.now(), 
+            text: "I'm sorry, I encountered an error while trying to generate a response.", 
+            sender: 'ai' as const
+          }];
+          localStorage.setItem('aiTutorMessages', JSON.stringify(updatedMessages));
+          return updatedMessages;
+        });
+      } finally {
+        setIsLoading(false);
       }
-    };
-    
-    // Check once on mount and then every 5 seconds
-    checkPendingExplanation();
-    const interval = setInterval(checkPendingExplanation, 5000);
-    
-    return () => clearInterval(interval);
-  }, []);
+    }, 100);
+  };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  // Modify the existing handleSendMessage function to use the new helper
+  const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    const userMessage = { id: Date.now(), text: input, sender: 'user' as const };
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
     
-    // Use the existing text message handler with the input value
+    // Use the helper function with the input text
     handleSendMessageWithText(input);
+    
+    // Clear the input field
+    setInput('');
   };
 
   const handleSaveNote = () => {
@@ -1674,37 +1700,79 @@ export default function AITutor() {
               backgroundColor: message.sender === 'ai' ? 'var(--bg-tertiary)' : 'var(--highlight-bg)',
               color: 'var(--text-primary)',
               alignSelf: message.sender === 'ai' ? 'flex-start' : 'flex-end',
-              padding: '12px 16px',
+              padding: message.sender === 'ai' ? '0' : '12px 16px',
               borderRadius: '12px',
-              maxWidth: '80%',
-              wordBreak: 'break-word'
+              maxWidth: message.sender === 'ai' ? '95%' : '80%',
+              wordBreak: 'break-word',
+              boxShadow: message.sender === 'ai' ? '0 2px 6px rgba(0,0,0,0.1)' : 'none'
             }}
           >
             {message.sender === 'ai' ? (
-              <div className="markdown-content">
-                <ReactMarkdown 
-                  remarkPlugins={[remarkGfm]} 
-                  components={{
-                    h1: ({children}) => <h1 style={{fontSize: '1.5em', fontWeight: 'bold', margin: '16px 0 8px 0'}}>{children}</h1>,
-                    h2: ({children}) => <h2 style={{fontSize: '1.3em', fontWeight: 'bold', margin: '14px 0 8px 0'}}>{children}</h2>,
-                    h3: ({children}) => <h3 style={{fontSize: '1.1em', fontWeight: 'bold', margin: '12px 0 8px 0'}}>{children}</h3>,
-                    h4: ({children}) => <h4 style={{fontSize: '1em', fontWeight: 'bold', margin: '10px 0 8px 0'}}>{children}</h4>,
-                    p: ({children}) => <p style={{margin: '8px 0'}}>{children}</p>,
-                    ul: ({children}) => <ul style={{paddingLeft: '20px', margin: '8px 0'}}>{children}</ul>,
-                    ol: ({children}) => <ol style={{paddingLeft: '20px', margin: '8px 0'}}>{children}</ol>,
-                    li: ({children}) => <li style={{margin: '4px 0'}}>{children}</li>,
-                    blockquote: ({children}) => <blockquote style={{borderLeft: '4px solid var(--border-color)', paddingLeft: '16px', margin: '16px 0'}}>{children}</blockquote>,
-                    code: ({node, className, children, ...props}) => {
-                      const match = /language-(\w+)/.exec(className || '');
-                      const isInline = !match && !className;
-                      return isInline 
-                        ? <code style={{backgroundColor: 'var(--code-bg)', padding: '2px 4px', borderRadius: '4px'}} {...props}>{children}</code>
-                        : <pre style={{backgroundColor: 'var(--code-bg)', padding: '12px', borderRadius: '8px', overflowX: 'auto'}}><code {...props}>{children}</code></pre>
-                    }
-                  }}
-                >
-                  {message.text}
-                </ReactMarkdown>
+              <div className="notion-style-response">
+                <div className="response-header">
+                  <span className="response-title">AI Response</span>
+                  <button 
+                    className="copy-button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(message.text);
+                      // You could add a toast notification here
+                    }}
+                    title="Copy to clipboard"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 13V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="response-content">
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]} 
+                    components={{
+                      h1: ({children}) => <h1 style={{fontSize: '1.5em', fontWeight: 'bold', margin: '16px 0 8px 0'}}>{children}</h1>,
+                      h2: ({children}) => <h2 style={{fontSize: '1.3em', fontWeight: 'bold', margin: '14px 0 8px 0'}}>{children}</h2>,
+                      h3: ({children}) => <h3 style={{fontSize: '1.1em', fontWeight: 'bold', margin: '12px 0 8px 0'}}>{children}</h3>,
+                      h4: ({children}) => <h4 style={{fontSize: '1em', fontWeight: 'bold', margin: '10px 0 8px 0'}}>{children}</h4>,
+                      p: ({children}) => <p style={{margin: '8px 0'}}>{children}</p>,
+                      ul: ({children}) => <ul style={{paddingLeft: '20px', margin: '8px 0'}}>{children}</ul>,
+                      ol: ({children}) => <ol style={{paddingLeft: '20px', margin: '8px 0'}}>{children}</ol>,
+                      li: ({children}) => <li style={{margin: '4px 0'}}>{children}</li>,
+                      blockquote: ({children}) => <blockquote style={{borderLeft: '4px solid var(--border-color)', paddingLeft: '16px', margin: '16px 0'}}>{children}</blockquote>,
+                      code: ({node, className, children, ...props}) => {
+                        const match = /language-(\w+)/.exec(className || '');
+                        const isInline = !match && !className;
+                        return isInline 
+                          ? <code style={{backgroundColor: 'var(--code-bg)', padding: '2px 4px', borderRadius: '4px'}} {...props}>{children}</code>
+                          : (
+                            <div className="code-block-container">
+                              <div className="code-block-header">
+                                <span className="language-label">{match ? match[1] : 'code'}</span>
+                                <button 
+                                  className="copy-code-button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const codeText = Array.isArray(children) 
+                                      ? children.join('') 
+                                      : String(children);
+                                    navigator.clipboard.writeText(codeText);
+                                  }}
+                                  title="Copy code"
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 13V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                </button>
+                              </div>
+                              <pre className="code-block-content"><code {...props}>{children}</code></pre>
+                            </div>
+                          )
+                      }
+                    }}
+                  >
+                    {message.text}
+                  </ReactMarkdown>
+                </div>
               </div>
             ) : (
               message.text
@@ -1919,6 +1987,99 @@ export default function AITutor() {
       }}>
         Powered by GPT-4o
       </div>
+
+      {/* Add styles for notion-like UI */}
+      <style jsx global>{`
+        .notion-style-response {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          overflow: hidden;
+          border-radius: 12px;
+        }
+        
+        .response-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 10px 12px;
+          background-color: var(--bg-primary);
+          border-bottom: 1px solid var(--border-color);
+          border-top-left-radius: 12px;
+          border-top-right-radius: 12px;
+        }
+        
+        .response-title {
+          font-weight: 600;
+          font-size: 14px;
+          color: var(--text-secondary);
+        }
+        
+        .copy-button, .copy-code-button {
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 4px;
+          color: var(--text-tertiary);
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .copy-button:hover, .copy-code-button:hover {
+          background-color: var(--hover-bg);
+          color: var(--text-primary);
+        }
+        
+        .response-content {
+          padding: 12px 16px;
+          max-height: 400px;
+          overflow-y: auto;
+          scrollbar-width: thin;
+          scrollbar-color: rgba(0,0,0,0.2) transparent;
+        }
+        
+        .response-content::-webkit-scrollbar {
+          width: 6px;
+        }
+        
+        .response-content::-webkit-scrollbar-thumb {
+          background-color: rgba(0,0,0,0.2);
+          border-radius: 3px;
+        }
+        
+        .code-block-container {
+          margin: 12px 0;
+          border-radius: 8px;
+          overflow: hidden;
+          background-color: var(--code-bg);
+          border: 1px solid var(--border-color);
+        }
+        
+        .code-block-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px 12px;
+          background-color: rgba(0,0,0,0.1);
+          border-bottom: 1px solid var(--border-color);
+        }
+        
+        .language-label {
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--text-tertiary);
+          text-transform: uppercase;
+        }
+        
+        .code-block-content {
+          margin: 0;
+          padding: 12px;
+          max-height: 300px;
+          overflow-x: auto;
+        }
+      `}</style>
     </div>
   ) : null;
 } 
