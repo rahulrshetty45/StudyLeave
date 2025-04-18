@@ -29,17 +29,22 @@ import {
   HelpCircle,
   Check,
   Send,
-  Underline
+  Underline,
+  Loader2,
+  Trash2,
+  Copy,
+  ChevronUp
 } from 'lucide-react';
-import { generateAIResponse, Message } from '@/lib/openai';
 import { FaArrowLeft, FaLink, FaRegTrashAlt, FaSave, FaImage, FaCode, FaParagraph, FaListUl, FaHeading, FaQuoteLeft, FaStar, FaMarkdown, FaClipboard, FaTimes } from 'react-icons/fa';
+import { RiListOrdered } from 'react-icons/ri';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { PiSpinnerGap } from 'react-icons/pi';
 import { LuExternalLink } from 'react-icons/lu';
+import { generateAIResponse, Message } from '@/lib/openai';
 
 // Define block types
-type BlockType = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bulletList' | 'numberedList' | 'todo' | 'code' | 'quote' | 'divider';
+type BlockType = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bulletList' | 'numberedList' | 'todo' | 'code' | 'quote' | 'divider' | 'aiResponse';
 
 interface Block {
   id: string;
@@ -100,6 +105,9 @@ export default function NotePage() {
   const [inPageMessages, setInPageMessages] = useState<{id: number, text: string, sender: 'user' | 'ai'}[]>([]);
   const [isInPageLoading, setIsInPageLoading] = useState<boolean>(false);
   const inPageChatRef = useRef<HTMLDivElement>(null);
+  
+  // At the top of the component, add a state for the input
+  const [aiQuestionInput, setAiQuestionInput] = useState('');
   
   // Initialize title and blocks from localStorage or defaults
   useEffect(() => {
@@ -573,17 +581,19 @@ export default function NotePage() {
     );
   };
   
-  // Block menu options
+  // Define the block options
   const blockOptions = [
-    { type: 'paragraph', label: 'Text', icon: <AlignLeft size={16} /> },
-    { type: 'heading1', label: 'Heading 1', icon: <Heading1 size={16} /> },
-    { type: 'heading2', label: 'Heading 2', icon: <Heading2 size={16} /> },
-    { type: 'bulletList', label: 'Bullet List', icon: <List size={16} /> },
-    { type: 'numberedList', label: 'Numbered List', icon: <ListOrdered size={16} /> },
-    { type: 'todo', label: 'To-do List', icon: <CheckSquare size={16} /> },
-    { type: 'code', label: 'Code', icon: <Code size={16} /> },
-    { type: 'quote', label: 'Quote', icon: <FileText size={16} /> },
-    { type: 'divider', label: 'Divider', icon: <Minus size={16} /> }
+    { label: 'Text', type: 'paragraph', icon: <FaParagraph size={14} /> },
+    { label: 'Heading 1', type: 'heading1', icon: <FaHeading size={14} /> },
+    { label: 'Heading 2', type: 'heading2', icon: <FaHeading size={14} style={{ transform: 'scale(0.85)' }} /> },
+    { label: 'Heading 3', type: 'heading3', icon: <FaHeading size={14} style={{ transform: 'scale(0.7)' }} /> },
+    { label: 'Bullet List', type: 'bulletList', icon: <FaListUl size={14} /> },
+    { label: 'Numbered List', type: 'numberedList', icon: <RiListOrdered size={14} /> },
+    { label: 'To-do', type: 'todo', icon: <CheckSquare size={14} /> },
+    { label: 'Code', type: 'code', icon: <FaCode size={14} /> },
+    { label: 'Quote', type: 'quote', icon: <FaQuoteLeft size={14} /> },
+    { label: 'Divider', type: 'divider', icon: <Minus size={14} /> },
+    { label: 'AI Response', type: 'aiResponse', icon: <Sparkles size={14} /> },
   ];
   
   // Render block based on its type
@@ -599,6 +609,102 @@ export default function NotePage() {
     let placeholderText = 'Type something...';
     let blockElement;
     
+    // Check if block content contains HTML and should be rendered with parse
+    const containsHtml = block.content && (
+      block.content.includes('<') && 
+      block.content.includes('>') && 
+      (block.content.includes('div') || 
+       block.content.includes('span') || 
+       block.content.includes('p') || 
+       block.content.includes('strong') || 
+       block.content.includes('em'))
+    );
+
+    // If this block is not being edited and contains HTML, create a parsed content viewer
+    if (containsHtml && activeBlock !== block.id) {
+      return (
+        <div 
+          key={block.id}
+          className="formatted-content" 
+          style={{ 
+            position: 'relative',
+            marginBottom: '12px',
+            cursor: 'text'
+          }}
+          // Make HTML blocks clickable so we can add content after them
+          onClick={(e) => {
+            // Instead of preventing propagation, let's allow creating a new block after this one
+            createNewBlock(block.id);
+          }}
+        >
+          {activeBlock === block.id && (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                showBlockMenuAtBlock(block.id);
+              }}
+              style={{
+                position: 'absolute',
+                left: '-30px',
+                top: '4px',
+                width: '24px',
+                height: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                opacity: 0.5,
+                transition: 'opacity 0.1s',
+                borderRadius: '3px'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '0.5';
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <Plus size={16} />
+            </div>
+          )}
+          <div className="content-viewer">
+            {parse(block.content)}
+          </div>
+          {/* Add a small button at the bottom to clearly show you can add content */}
+          <div 
+            onClick={(e) => {
+              e.stopPropagation();
+              createNewBlock(block.id);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '4px',
+              marginTop: '4px',
+              cursor: 'pointer',
+              opacity: 0.5,
+              transition: 'opacity 0.2s',
+              borderRadius: '4px',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.opacity = '1';
+              e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = '0.5';
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <Plus size={12} />
+          </div>
+        </div>
+      );
+    }
+    
+    // For blocks without HTML or that are being edited, use the normal type-based rendering
     switch (block.type) {
       case 'heading1':
         blockStyle = {
@@ -631,6 +737,75 @@ export default function NotePage() {
           marginBottom: '8px'
         };
         placeholderText = 'Heading 3';
+        break;
+        
+      case 'aiResponse':
+        blockStyle = {
+          ...blockStyle,
+          fontStyle: 'italic',
+          fontSize: '0.85em',
+          color: 'var(--text-tertiary, #6b7280)',
+          borderLeft: '3px solid var(--highlight-color)',
+          paddingLeft: '16px',
+          marginTop: '8px',
+          marginBottom: '16px',
+          position: 'relative',
+          paddingTop: '8px',
+          paddingBottom: '8px',
+          lineHeight: '1.6',
+          backgroundColor: 'transparent'
+        };
+        placeholderText = 'AI Response';
+        // Special handling for aiResponse blocks to allow adding content after
+        blockElement = (
+          <div style={{ position: 'relative' }}>
+            <div
+              ref={el => {
+                blockRefs.current[block.id] = el;
+                return undefined;
+              }}
+              data-block-id={block.id}
+              contentEditable
+              suppressContentEditableWarning
+              style={blockStyle}
+              onInput={(e) => handleBlockChange(block.id, e)}
+              onFocus={() => handleFocus(block.id)}
+              onBlur={(e) => handleBlur(block.id, e)}
+              onKeyDown={(e) => handleKeyDown(block.id, e)}
+              data-placeholder={block.content ? '' : placeholderText}
+            >
+              {block.content || ''}
+            </div>
+            {/* Add a small button at the bottom to clearly show you can add content */}
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                createNewBlock(block.id);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '4px',
+                marginTop: '4px',
+                cursor: 'pointer',
+                opacity: 0.5,
+                transition: 'opacity 0.2s',
+                borderRadius: '4px',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.opacity = '1';
+                e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '0.5';
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <Plus size={12} />
+            </div>
+          </div>
+        );
         break;
         
       case 'bulletList':
@@ -1074,10 +1249,35 @@ The notes will be saved in a note-taking application, so make them well-organize
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
         const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+        
+        // Calculate initial position
+        let top = rect.bottom + scrollTop + 10;
+        let left = rect.left + (rect.width / 2);
+        
+        // Get viewport dimensions
+        const viewportHeight = window.innerHeight;
+        const viewportWidth = window.innerWidth;
+        
+        // Ensure the tooltip stays within viewport
+        // If would appear too low, position it above the selection
+        if (rect.bottom + 150 > viewportHeight) {
+          top = rect.top + scrollTop - 50; // Position above selection
+        }
+        
+        // If would appear too far right, adjust left position
+        if (left + 150 > viewportWidth + scrollLeft) {
+          left = viewportWidth + scrollLeft - 170;
+        }
+        
+        // If would appear too far left, adjust left position
+        if (left - 100 < scrollLeft) {
+          left = scrollLeft + 120;
+        }
         
         setTooltipPosition({
-          top: rect.bottom + scrollTop + 10,
-          left: rect.left + (rect.width / 2)
+          top,
+          left
         });
         
         // Only show tooltip for substantial selections (15+ characters)
@@ -1114,10 +1314,31 @@ The notes will be saved in a note-taking application, so make them well-organize
       // Prevent default context menu
       event.preventDefault();
       
-      // Show our custom context menu
+      // Calculate initial position
+      let top = event.pageY;
+      let left = event.pageX;
+      
+      // Get viewport dimensions
+      const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+      
+      // Ensure the context menu stays within viewport
+      // If would appear too low, position it higher
+      if (event.clientY + 300 > viewportHeight) {
+        top = Math.max(scrollTop + 10, event.pageY - 300);
+      }
+      
+      // If would appear too far right, position it more to the left
+      if (event.clientX + 250 > viewportWidth) {
+        left = event.pageX - 250;
+      }
+      
+      // Show our custom context menu with adjusted position
       setContextMenuPosition({
-        top: event.pageY,
-        left: event.pageX
+        top,
+        left
       });
       
       setShowContextMenu(true);
@@ -1155,9 +1376,11 @@ The notes will be saved in a note-taking application, so make them well-organize
   const formatSelectedText = (format: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'code' | 'clear' | 
     'text-red' | 'text-blue' | 'text-green' | 'text-purple' | 
     'highlight-yellow' | 'highlight-green' | 'highlight-blue' | 'highlight-pink' |
+    'highlight-purple' | 'highlight-orange' | 'highlight-teal' | 'highlight-gray' |
     'font-size-small' | 'font-size-medium' | 'font-size-large' | 'font-size-xlarge' | 'font-size-xxlarge' | 
     'font-size-custom' |
-    'font-serif' | 'font-mono' | 'font-cursive' | 'font-sans' | 'font-arial' | 'font-times' | 'font-verdana' | 'font-comic') => {
+    'font-serif' | 'font-mono' | 'font-cursive' | 'font-sans' | 'font-arial' | 'font-times' | 'font-verdana' | 'font-comic' |
+    'font-handwritten' | 'font-fantasy' | 'font-system') => {
     // Get the current selection
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
@@ -1183,8 +1406,8 @@ The notes will be saved in a note-taking application, so make them well-organize
         suffix = '</u>';
         break;
       case 'strikethrough':
-        prefix = '<s>';
-        suffix = '</s>';
+        prefix = ' ';
+        suffix = ' ';
         break;
       case 'code':
         prefix = '<code>';
@@ -1222,7 +1445,22 @@ The notes will be saved in a note-taking application, so make them well-organize
         prefix = '<span style="background-color: #fed7e2;">';
         suffix = '</span>';
         break;
-      // Font Size Options
+      case 'highlight-purple':
+        prefix = '<span style="background-color: #e9d8fd;">';
+        suffix = '</span>';
+        break;
+      case 'highlight-orange':
+        prefix = '<span style="background-color: #feebc8;">';
+        suffix = '</span>';
+        break;
+      case 'highlight-teal':
+        prefix = '<span style="background-color: #b2f5ea;">';
+        suffix = '</span>';
+        break;
+      case 'highlight-gray':
+        prefix = '<span style="background-color: #e2e8f0;">';
+        suffix = '</span>';
+        break;
       case 'font-size-small':
         prefix = '<span style="font-size: 0.85em;">';
         suffix = '</span>';
@@ -1250,7 +1488,6 @@ The notes will be saved in a note-taking application, so make them well-organize
         prefix = `<span style="font-size: ${size}px;">`;
         suffix = '</span>';
         break;
-      // Font Style Options
       case 'font-serif':
         prefix = '<span style="font-family: Georgia, Times, serif;">';
         suffix = '</span>';
@@ -1281,6 +1518,18 @@ The notes will be saved in a note-taking application, so make them well-organize
         break;
       case 'font-comic':
         prefix = '<span style="font-family: \'Comic Sans MS\', cursive, sans-serif;">';
+        suffix = '</span>';
+        break;
+      case 'font-handwritten':
+        prefix = '<span style="font-family: \'Segoe Script\', \'Bradley Hand\', Chilanka, cursive;">';
+        suffix = '</span>';
+        break;
+      case 'font-fantasy':
+        prefix = '<span style="font-family: Papyrus, Fantasy;">';
+        suffix = '</span>';
+        break;
+      case 'font-system':
+        prefix = '<span style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', system-ui, sans-serif;">';
         suffix = '</span>';
         break;
       case 'clear':
@@ -1407,8 +1656,16 @@ The notes will be saved in a note-taking application, so make them well-organize
       const systemMessage: Message = {
         role: 'system',
         content: `You are a helpful AI assistant answering questions about ${noteContext}. 
-        Be concise, accurate, and conversational in your responses. Format your answers with markdown when appropriate.
-        Focus on providing information relevant to the current note content.`
+        Format your answers clearly and thoroughly with these guidelines:
+        
+        - Use headings for main sections (use ** for bold headings)
+        - Create clear, concise paragraphs
+        - Use bulleted lists (with - symbol) for enumerations
+        - Use numbered lists (1., 2., etc.) for sequential items
+        - Bold important terms and concepts
+        - Provide examples when helpful
+        
+        Keep your response well-structured and informative.`
       };
       
       // Create the user message
@@ -1420,34 +1677,131 @@ The notes will be saved in a note-taking application, so make them well-organize
       // Generate response
       const aiResponse = await generateAIResponse([systemMessage, apiUserMessage]);
       
-      // Add AI response to messages
-      const responseMessage = {
-        id: Date.now(),
-        text: aiResponse || "I'm sorry, I couldn't generate a response.",
-        sender: 'ai' as const
+      // Process the response to convert markdown-like formatting to HTML
+      let formattedResponse = aiResponse || "I'm sorry, I couldn't generate a response.";
+      
+      // Add line breaks to ensure proper regex matching (but keep paragraphs intact)
+      formattedResponse = formattedResponse.replace(/\n\n+/g, '\n\n');
+      
+      // Process lists first (before other replacements)
+      // Find all bullet lists and wrap them in proper HTML
+      formattedResponse = formattedResponse.replace(/(?:^|\n)- (.+)(?:\n- (.+))+/g, function(match) {
+        // Extract each list item
+        const items = match.split('\n- ').filter(item => item.trim() !== '');
+        // Build HTML list
+        return `<ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 12px; font-style: italic;">${
+          items.map(item => `<li style="margin-bottom: 6px; font-style: italic;">${item.trim()}</li>`).join('')
+        }</ul>`;
+      });
+      
+      // Find all single bullet items
+      formattedResponse = formattedResponse.replace(/(?:^|\n)- (.+)(?!\n- )/g, function(match, item) {
+        return `<ul style="list-style-type: disc; margin-left: 20px; margin-bottom: 12px; font-style: italic;"><li style="margin-bottom: 6px; font-style: italic;">${item.trim()}</li></ul>`;
+      });
+      
+      // Find all numbered lists and wrap them in proper HTML
+      formattedResponse = formattedResponse.replace(/(?:^|\n)\d+\. (.+)(?:\n\d+\. (.+))+/g, function(match) {
+        // Extract each list item, ignoring the number
+        const items = match.split(/\n\d+\. /).filter(item => item.trim() !== '');
+        // Build HTML list
+        return `<ol style="list-style-type: decimal; margin-left: 20px; margin-bottom: 12px; font-style: italic;">${
+          items.map(item => `<li style="margin-bottom: 6px; font-style: italic;">${item.trim()}</li>`).join('')
+        }</ol>`;
+      });
+      
+      // Find all single numbered items
+      formattedResponse = formattedResponse.replace(/(?:^|\n)\d+\. (.+)(?!\n\d+\. )/g, function(match, item) {
+        return `<ol style="list-style-type: decimal; margin-left: 20px; margin-bottom: 12px; font-style: italic;"><li style="margin-bottom: 6px; font-style: italic;">${item.trim()}</li></ol>`;
+      });
+      
+      // Replace headers
+      formattedResponse = formattedResponse.replace(/(?:^|\n)### (.+)(?:\n|$)/g, '<h4 style="margin-top: 16px; margin-bottom: 8px; font-weight: 600; font-size: 1.05em; font-style: italic; color: #6b7280;">$1</h4>');
+      formattedResponse = formattedResponse.replace(/(?:^|\n)## (.+)(?:\n|$)/g, '<h3 style="margin-top: 20px; margin-bottom: 10px; font-weight: 600; font-size: 1.15em; font-style: italic; color: #6b7280;">$1</h3>');
+      formattedResponse = formattedResponse.replace(/(?:^|\n)# (.+)(?:\n|$)/g, '<h2 style="margin-top: 24px; margin-bottom: 12px; font-weight: 700; font-size: 1.25em; font-style: italic; color: #6b7280;">$1</h2>');
+      
+      // Replace bold and italic text
+      formattedResponse = formattedResponse.replace(/\*\*(.+?)\*\*/g, '<strong style="font-style: italic;">$1</strong>');
+      formattedResponse = formattedResponse.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      
+      // Wrap remaining paragraphs (text between two newlines)
+      // Split by double newline and wrap each paragraph
+      formattedResponse = formattedResponse.split('\n\n').map(para => {
+        // Skip already wrapped HTML elements
+        if (para.trim().match(/^<(h[2-4]|ul|ol|p)/)) {
+          return para;
+        }
+        // Skip empty paragraphs
+        if (!para.trim()) {
+          return '';
+        }
+        return `<p style="margin-bottom: 12px; font-style: italic;">${para.trim()}</p>`;
+      }).join('');
+      
+      // Fix any remaining single paragraphs
+      formattedResponse.split('\n').forEach(line => {
+        if (line.trim() && !line.trim().match(/^<(h[2-4]|ul|ol|p|li)/)) {
+          formattedResponse = formattedResponse.replace(line, `<p style="margin-bottom: 12px; font-style: italic;">${line}</p>`);
+        }
+      });
+      
+      // Clean up any duplicated or nested paragraphs
+      formattedResponse = formattedResponse.replace(/<p style="margin-bottom: 12px; font-style: italic;"><p style="margin-bottom: 12px; font-style: italic;">/g, '<p style="margin-bottom: 12px; font-style: italic;">');
+      formattedResponse = formattedResponse.replace(/<\/p><\/p>/g, '</p>');
+      
+      // Clean up any empty paragraphs
+      formattedResponse = formattedResponse.replace(/<p style="margin-bottom: 12px; font-style: italic;"><\/p>/g, '');
+      
+      // Wrap in a container div for consistent styling
+      formattedResponse = `<div style="color: var(--text-tertiary, #6b7280); line-height: 1.6; font-style: italic;">${formattedResponse}</div>`;
+      
+      // First add the user's question as a block with HTML - using a green color instead of blue
+      const questionBlock: Block = {
+        id: generateId(),
+        type: 'paragraph',
+        content: `<div style="display: inline-block; padding: 8px 16px; background-color: #f0fff5; border: 2px solid #4CAF50; border-radius: 20px; color: var(--text-primary); font-weight: 500; margin: 10px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-style: normal;">${userMessage}</div>`
       };
       
-      setInPageMessages(prev => [...prev, responseMessage]);
+      // Then create the AI response block which will be styled by its block type
+      const responseBlock: Block = {
+        id: generateId(),
+        type: 'aiResponse',
+        content: formattedResponse
+      };
+      
+      // Insert both blocks after the active block or at the end
+      setBlocks(prevBlocks => {
+        const newBlocks = [...prevBlocks];
+        if (activeBlock) {
+          const activeIndex = newBlocks.findIndex(block => block.id === activeBlock);
+          if (activeIndex !== -1) {
+            // Insert question followed by response
+            newBlocks.splice(activeIndex + 1, 0, questionBlock, responseBlock);
+            return newBlocks;
+          }
+        }
+        // If no active block or not found, append to the end
+        return [...newBlocks, questionBlock, responseBlock];
+      });
+      
+      // Save the updated blocks to localStorage
+      setTimeout(() => {
+        localStorage.setItem(blocksKey, JSON.stringify(blocks));
+      }, 100);
+      
     } catch (error) {
       console.error('Error generating in-page response:', error);
       
-      // Add error message
-      const errorMessage = {
-        id: Date.now(),
-        text: "I'm sorry, I encountered an error while trying to respond.",
-        sender: 'ai' as const
+      // Add error message as a block
+      const errorBlock: Block = {
+        id: generateId(),
+        type: 'aiResponse',
+        content: "<p style='margin-bottom: 12px;'>I'm sorry, I encountered an error while trying to respond.</p>"
       };
       
-      setInPageMessages(prev => [...prev, errorMessage]);
+      setBlocks(prevBlocks => [...prevBlocks, errorBlock]);
+      
     } finally {
       setIsInPageLoading(false);
-      
-      // Scroll to bottom after a short delay to ensure the message is rendered
-      setTimeout(() => {
-        if (inPageChatRef.current) {
-          inPageChatRef.current.scrollTop = inPageChatRef.current.scrollHeight;
-        }
-      }, 100);
     }
   };
 
@@ -1571,7 +1925,7 @@ The notes will be saved in a note-taking application, so make them well-organize
               ) : (
                 <>
                   <Sparkles size={16} />
-                  Autofill with AI
+                  Generate Full Notes with AI
                 </>
               )}
             </button>
@@ -1579,42 +1933,34 @@ The notes will be saved in a note-taking application, so make them well-organize
         </div>
         
         {/* Editor Blocks */}
-        <div className="notion-blocks-container" style={{
-          minHeight: '60vh',
-          fontSize: '16px',
-          lineHeight: 1.6,
-          color: 'var(--text-primary)',
-        }}>
+        <div style={{ marginBottom: '24px' }}>
           {blocks.map(block => {
-            // If this block appears to contain HTML content and is not being edited
-            const containsHtml = block.content && 
-              (block.content.includes('<h') || 
-               block.content.includes('<strong>') ||
-               block.content.includes('<em>') ||
-               block.content.includes('<ul>') ||
-               block.content.includes('<ol>') ||
-               block.content.includes('<li>') ||
-               block.content.includes('<p>'));
-            
-            const isBeingEdited = activeBlock === block.id;
-            
-            // If it contains HTML and is not being edited, render parsed content
-            if (containsHtml && !isBeingEdited) {
+            // Check if block content contains HTML and should be rendered with parse
+            const containsHtml = block.content && (
+              block.content.includes('<') && 
+              block.content.includes('>') && 
+              (block.content.includes('div') || 
+               block.content.includes('span') || 
+               block.content.includes('p') || 
+               block.content.includes('strong') || 
+               block.content.includes('em'))
+            );
+
+            // If this block is not being edited and contains HTML, create a parsed content viewer
+            if (containsHtml && activeBlock !== block.id) {
               return (
                 <div 
                   key={block.id}
                   className="formatted-content" 
                   style={{ 
                     position: 'relative',
-                    marginBottom: '16px'
+                    marginBottom: '12px',
+                    cursor: 'text'
                   }}
-                  onClick={() => {
-                    // Make the block editable on click
-                    setActiveBlock(block.id);
-                    setTimeout(() => {
-                      const el = blockRefs.current[block.id];
-                      if (el) el.focus();
-                    }, 0);
+                  // Make HTML blocks clickable so we can add content after them
+                  onClick={(e) => {
+                    // Instead of preventing propagation, let's allow creating a new block after this one
+                    createNewBlock(block.id);
                   }}
                 >
                   {activeBlock === block.id && (
@@ -1652,6 +1998,34 @@ The notes will be saved in a note-taking application, so make them well-organize
                   <div className="content-viewer">
                     {parse(block.content)}
                   </div>
+                  {/* Add a small button at the bottom to clearly show you can add content */}
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      createNewBlock(block.id);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '4px',
+                      marginTop: '4px',
+                      cursor: 'pointer',
+                      opacity: 0.5,
+                      transition: 'opacity 0.2s',
+                      borderRadius: '4px',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = '1';
+                      e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = '0.5';
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <Plus size={12} />
+                  </div>
                 </div>
               );
             }
@@ -1664,89 +2038,6 @@ The notes will be saved in a note-taking application, so make them well-organize
             );
           })}
         </div>
-        
-        {/* Embedded AI Assistant Chat Section */}
-        {inPageMessages.length > 0 && (
-          <div 
-            style={{
-              marginTop: '40px',
-              marginBottom: '40px',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{
-              padding: '12px 16px',
-              borderBottom: '1px solid var(--border-color)',
-              backgroundColor: 'var(--bg-secondary)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div style={{ fontWeight: '600', fontSize: '14px' }}>AI Assistant</div>
-              <button
-                onClick={() => setInPageMessages([])}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--text-tertiary)'
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            
-            <div 
-              ref={inPageChatRef}
-              style={{
-                padding: '16px',
-                maxHeight: '400px',
-                overflowY: 'auto',
-                backgroundColor: 'var(--bg-primary)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px'
-              }}
-            >
-              {inPageMessages.map(message => (
-                <div
-                  key={message.id}
-                  style={{
-                    backgroundColor: message.sender === 'ai' ? 'var(--bg-tertiary)' : 'var(--highlight-bg)',
-                    color: 'var(--text-primary)',
-                    alignSelf: message.sender === 'ai' ? 'flex-start' : 'flex-end',
-                    padding: '12px 16px',
-                    borderRadius: '8px',
-                    maxWidth: message.sender === 'ai' ? '90%' : '80%',
-                    wordBreak: 'break-word',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
-                  }}
-                >
-                  {message.text}
-                </div>
-              ))}
-              
-              {isInPageLoading && (
-                <div 
-                  style={{
-                    alignSelf: 'flex-start',
-                    backgroundColor: 'var(--bg-tertiary)',
-                    padding: '12px 16px',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  <div className="animate-spin">⏳</div>
-                  <span>Thinking...</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
         
         {/* Last edited info */}
         <div style={{
@@ -1821,8 +2112,8 @@ The notes will be saved in a note-taking application, so make them well-organize
           <div 
             ref={contextMenuRef}
             style={{
-              position: 'absolute',
-              top: `${contextMenuPosition.top}px`,
+              position: 'fixed',
+              top: `${contextMenuPosition.top}px`, 
               left: `${contextMenuPosition.left}px`,
               backgroundColor: 'var(--bg-secondary)',
               border: '1px solid var(--border-color)',
@@ -1830,7 +2121,10 @@ The notes will be saved in a note-taking application, so make them well-organize
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
               padding: '8px',
               zIndex: 9999,
-              minWidth: '220px'
+              minWidth: '220px',
+              maxHeight: '80vh',
+              overflowY: 'auto',
+              maxWidth: '300px'
             }}
           >
             <div style={{
@@ -1843,25 +2137,27 @@ The notes will be saved in a note-taking application, so make them well-organize
               FORMAT TEXT
             </div>
             
+            {/* Primary Formatting Options */}
             <div style={{
               display: 'flex',
-              flexDirection: 'column',
-              gap: '2px'
+              flexWrap: 'wrap',
+              gap: '4px',
+              margin: '0 8px 8px'
             }}>
               <button
                 onClick={() => formatSelectedText('bold')}
+                title="Bold"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 12px',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   backgroundColor: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-primary)',
-                  textAlign: 'left',
-                  fontSize: '14px'
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-primary)'
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
@@ -1870,23 +2166,23 @@ The notes will be saved in a note-taking application, so make them well-organize
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                <Bold size={16} /> <strong>Bold</strong>
+                <Bold size={14} />
               </button>
               
               <button
                 onClick={() => formatSelectedText('italic')}
+                title="Italic"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 12px',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   backgroundColor: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-primary)',
-                  textAlign: 'left',
-                  fontSize: '14px'
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-primary)'
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
@@ -1895,23 +2191,23 @@ The notes will be saved in a note-taking application, so make them well-organize
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                <Italic size={16} /> <em>Italic</em>
+                <Italic size={14} />
               </button>
               
               <button
                 onClick={() => formatSelectedText('underline')}
+                title="Underline"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 12px',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   backgroundColor: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-primary)',
-                  textAlign: 'left',
-                  fontSize: '14px'
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-primary)'
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
@@ -1920,23 +2216,184 @@ The notes will be saved in a note-taking application, so make them well-organize
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                <Underline size={16} /> <u>Underline</u>
+                <Underline size={14} />
               </button>
+              
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => {
+                    const dropdown = document.getElementById('highlight-color-dropdown');
+                    if (dropdown) {
+                      dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+                    }
+                  }}
+                  title="Highlight"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    backgroundColor: 'transparent',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-primary)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <span style={{ 
+                    backgroundColor: '#fefcbf', 
+                    width: '16px', 
+                    height: '16px', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    borderRadius: '2px',
+                    border: '1px solid #e2c35d'
+                  }}>
+                    <span style={{ fontSize: '10px', color: '#000' }}>A</span>
+                  </span>
+                </button>
+                
+                <div 
+                  id="highlight-color-dropdown"
+                  style={{
+                    display: 'none',
+                    position: 'absolute',
+                    top: '100%',
+                    left: '0',
+                    backgroundColor: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    padding: '6px',
+                    marginTop: '4px',
+                    zIndex: 10001,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    width: '140px'
+                  }}
+                >
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>HIGHLIGHT COLORS</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    <button
+                      onClick={() => formatSelectedText('highlight-yellow')}
+                      title="Yellow"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#fefcbf',
+                        border: '1px solid #e2c35d',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <button
+                      onClick={() => formatSelectedText('highlight-green')}
+                      title="Green"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#c6f6d5',
+                        border: '1px solid #9ae6b4',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <button
+                      onClick={() => formatSelectedText('highlight-blue')}
+                      title="Blue"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#bee3f8',
+                        border: '1px solid #90cdf4',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <button
+                      onClick={() => formatSelectedText('highlight-pink')}
+                      title="Pink"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#fed7e2',
+                        border: '1px solid #fbb6ce',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <button
+                      onClick={() => formatSelectedText('highlight-purple')}
+                      title="Purple"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#e9d8fd',
+                        border: '1px solid #d6bcfa',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <button
+                      onClick={() => formatSelectedText('highlight-orange')}
+                      title="Orange"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#feebc8',
+                        border: '1px solid #fbd38d',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <button
+                      onClick={() => formatSelectedText('highlight-teal')}
+                      title="Teal"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#b2f5ea',
+                        border: '1px solid #81e6d9',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <button
+                      onClick={() => formatSelectedText('highlight-gray')}
+                      title="Gray"
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '4px',
+                        backgroundColor: '#e2e8f0',
+                        border: '1px solid #cbd5e0',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
               
               <button
                 onClick={() => formatSelectedText('code')}
+                title="Code"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 12px',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   backgroundColor: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-primary)',
-                  textAlign: 'left',
-                  fontSize: '14px'
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-primary)'
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
@@ -1945,415 +2402,393 @@ The notes will be saved in a note-taking application, so make them well-organize
                   e.currentTarget.style.backgroundColor = 'transparent';
                 }}
               >
-                <Code size={16} /> <code>Code</code>
-              </button>
-              
-              {/* Font Size Section */}
-              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-              <div style={{
-                padding: '4px 8px',
-                fontSize: '13px',
-                color: 'var(--text-tertiary)',
-                fontWeight: '500',
-                marginBottom: '2px'
-              }}>
-                FONT SIZE
-              </div>
-              
-              <div style={{ display: 'flex', padding: '4px 12px', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => formatSelectedText('font-size-small')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Small (0.85em)"
-                >
-                  Small
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-size-medium')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Medium (1em)"
-                >
-                  Medium
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-size-large')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontSize: '15px',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Large (1.25em)"
-                >
-                  Large
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-size-xlarge')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontSize: '16px',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Extra Large (1.5em)"
-                >
-                  XL
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-size-xxlarge')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontSize: '18px',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="XX Large (2em)"
-                >
-                  XXL
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-size-custom')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                  title="Custom Size (in pixels)"
-                >
-                  Custom...
-                </button>
-              </div>
-              
-              {/* Font Style Section */}
-              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-              <div style={{
-                padding: '4px 8px',
-                fontSize: '13px',
-                color: 'var(--text-tertiary)',
-                fontWeight: '500',
-                marginBottom: '2px'
-              }}>
-                FONT STYLE
-              </div>
-              
-              <div style={{ display: 'flex', padding: '4px 12px', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => formatSelectedText('font-sans')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: 'Helvetica, Arial, sans-serif',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Sans Serif Font"
-                >
-                  Sans-serif
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-serif')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: 'Georgia, serif',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Serif Font"
-                >
-                  Serif
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-mono')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: 'monospace',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Monospace Font"
-                >
-                  Monospace
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-cursive')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: 'cursive',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Cursive Font"
-                >
-                  Cursive
-                </button>
-              </div>
-              <div style={{ display: 'flex', padding: '4px 12px 8px', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => formatSelectedText('font-arial')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: 'Arial, sans-serif',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Arial Font"
-                >
-                  Arial
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-times')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: '"Times New Roman", Times, serif',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Times New Roman Font"
-                >
-                  Times
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-verdana')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: 'Verdana, Geneva, sans-serif',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Verdana Font"
-                >
-                  Verdana
-                </button>
-                <button
-                  onClick={() => formatSelectedText('font-comic')}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'transparent',
-                    fontFamily: '"Comic Sans MS", cursive, sans-serif',
-                    cursor: 'pointer',
-                    color: 'var(--text-primary)'
-                  }}
-                  title="Comic Sans MS Font"
-                >
-                  Comic Sans
-                </button>
-              </div>
-              
-              {/* Text Colors Section */}
-              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-              <div style={{
-                padding: '4px 8px',
-                fontSize: '13px',
-                color: 'var(--text-tertiary)',
-                fontWeight: '500',
-                marginBottom: '2px'
-              }}>
-                TEXT COLOR
-              </div>
-              
-              <div style={{ display: 'flex', padding: '8px 12px', gap: '10px' }}>
-                <button
-                  onClick={() => formatSelectedText('text-red')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#e53e3e',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Red"
-                />
-                <button
-                  onClick={() => formatSelectedText('text-blue')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#3182ce',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Blue"
-                />
-                <button
-                  onClick={() => formatSelectedText('text-green')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#38a169',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Green"
-                />
-                <button
-                  onClick={() => formatSelectedText('text-purple')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#805ad5',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Purple"
-                />
-              </div>
-              
-              {/* Highlight Colors Section */}
-              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-              <div style={{
-                padding: '4px 8px',
-                fontSize: '13px',
-                color: 'var(--text-tertiary)',
-                fontWeight: '500',
-                marginBottom: '2px'
-              }}>
-                HIGHLIGHT
-              </div>
-              
-              <div style={{ display: 'flex', padding: '8px 12px', gap: '10px' }}>
-                <button
-                  onClick={() => formatSelectedText('highlight-yellow')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#fefcbf',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Yellow Highlight"
-                />
-                <button
-                  onClick={() => formatSelectedText('highlight-green')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#c6f6d5',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Green Highlight"
-                />
-                <button
-                  onClick={() => formatSelectedText('highlight-blue')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#bee3f8',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Blue Highlight"
-                />
-                <button
-                  onClick={() => formatSelectedText('highlight-pink')}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#fed7e2',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
-                  }}
-                  title="Pink Highlight"
-                />
-              </div>
-              
-              <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
-              
-              <button
-                onClick={() => formatSelectedText('clear')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 12px',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-primary)',
-                  textAlign: 'left',
-                  fontSize: '14px'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                <X size={16} /> Clear Formatting
+                <Code size={14} />
               </button>
             </div>
+            
+            {/* Color Palette */}
+            <div style={{ 
+              padding: '4px 8px',
+              display: 'flex',
+              gap: '6px',
+              margin: '0 0 8px'
+            }}>
+              <button
+                onClick={() => formatSelectedText('text-red')}
+                title="Red Text"
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  backgroundColor: '#e53e3e',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                }}
+              />
+              <button
+                onClick={() => formatSelectedText('text-blue')}
+                title="Blue Text"
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  backgroundColor: '#3182ce',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                }}
+              />
+              <button
+                onClick={() => formatSelectedText('text-green')}
+                title="Green Text"
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  backgroundColor: '#38a169',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                }}
+              />
+              <button
+                onClick={() => formatSelectedText('highlight-yellow')}
+                title="Yellow Highlight"
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  backgroundColor: '#fefcbf',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+                }}
+              />
+            </div>
+            
+            {/* Advanced Formatting Section - Implemented as dropdown */}
+            <div style={{ 
+              position: 'relative',
+              margin: '0 8px'
+            }}>
+              <button
+                onClick={() => {
+                  const dropdown = document.getElementById('advanced-format-dropdown');
+                  if (dropdown) {
+                    dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px'
+                }}
+              >
+                <span>Advanced Formatting</span>
+                <ChevronDown size={14} />
+              </button>
+              
+              <div 
+                id="advanced-format-dropdown"
+                style={{
+                  display: 'none',
+                  position: 'absolute',
+                  top: '100%',
+                  left: '0',
+                  width: '100%',
+                  backgroundColor: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  padding: '8px',
+                  marginTop: '4px',
+                  zIndex: 10000,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                }}
+              >
+                {/* Font Size Section */}
+                <div style={{
+                  padding: '4px 0',
+                  fontSize: '12px',
+                  color: 'var(--text-tertiary)',
+                  fontWeight: '500',
+                  marginBottom: '4px'
+                }}>
+                  FONT SIZE
+                </div>
+                
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+                  <button
+                    onClick={() => formatSelectedText('font-size-small')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Small (0.85em)"
+                  >
+                    Small
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-size-medium')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Medium (1em)"
+                  >
+                    Medium
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-size-large')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Large (1.25em)"
+                  >
+                    Large
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-size-xlarge')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Extra Large (1.5em)"
+                  >
+                    XL
+                  </button>
+                </div>
+                
+                {/* Font Style Section */}
+                <div style={{
+                  padding: '4px 0',
+                  fontSize: '12px',
+                  color: 'var(--text-tertiary)',
+                  fontWeight: '500',
+                  marginBottom: '4px'
+                }}>
+                  FONT STYLE
+                </div>
+                
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+                  <button
+                    onClick={() => formatSelectedText('font-sans')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontFamily: 'Helvetica, Arial, sans-serif',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Sans Serif Font"
+                  >
+                    Sans
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-serif')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontFamily: 'Georgia, serif',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Serif Font"
+                  >
+                    Serif
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-mono')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Monospace Font"
+                  >
+                    Mono
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-cursive')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontFamily: 'cursive',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Cursive Font"
+                  >
+                    Cursive
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-handwritten')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontFamily: 'Segoe Script, Bradley Hand, cursive',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Handwritten Style"
+                  >
+                    Script
+                  </button>
+                  <button
+                    onClick={() => formatSelectedText('font-fantasy')}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'transparent',
+                      fontFamily: 'Papyrus, Fantasy',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)'
+                    }}
+                    title="Fantasy Font"
+                  >
+                    Fantasy
+                  </button>
+                </div>
+                
+                {/* More Colors */}
+                <div style={{
+                  padding: '4px 0',
+                  fontSize: '12px',
+                  color: 'var(--text-tertiary)',
+                  fontWeight: '500',
+                  marginBottom: '4px'
+                }}>
+                  MORE COLORS
+                </div>
+                
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                  <button
+                    onClick={() => formatSelectedText('text-purple')}
+                    style={{
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: '#805ad5',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                    title="Purple Text"
+                  />
+                  <button
+                    onClick={() => formatSelectedText('highlight-green')}
+                    style={{
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: '#c6f6d5',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                    title="Green Highlight"
+                  />
+                  <button
+                    onClick={() => formatSelectedText('highlight-blue')}
+                    style={{
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: '#bee3f8',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                    title="Blue Highlight"
+                  />
+                  <button
+                    onClick={() => formatSelectedText('highlight-pink')}
+                    style={{
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: '#fed7e2',
+                      border: 'none',
+                      cursor: 'pointer'
+                    }}
+                    title="Pink Highlight"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '8px 0' }} />
+            
+            <button
+              onClick={() => formatSelectedText('clear')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: 'var(--text-primary)',
+                textAlign: 'left',
+                fontSize: '13px',
+                width: '100%'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <X size={14} /> Clear Formatting
+            </button>
           </div>
         )}
         

@@ -321,66 +321,73 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
         </main>
       </div>
       
-      {/* Floating Chat Input at bottom center */}
-      <div className="floating-chat-input" style={{
+      {/* Floating Chat Input with background container */}
+      <div style={{
         position: 'fixed',
-        bottom: '24px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '100%',
-        maxWidth: '600px',
-        padding: '0 20px',
+        bottom: 0,
+        left: '240px',
+        right: aiTutorExpanded ? `${aiTutorWidth}px` : 0,
+        backgroundColor: 'var(--bg-secondary)',
+        borderTop: '1px solid var(--border-color)',
+        padding: '16px 24px',
         zIndex: 40,
-        // Adjust left position to account for sidebar and AI tutor
-        marginLeft: aiTutorExpanded ? `-${aiTutorWidth / 2}px` : '0'
+        transition: 'right 0.3s ease',
+        boxShadow: '0 -4px 12px rgba(0, 0, 0, 0.05)'
       }}>
-        <form 
-          onSubmit={sendMessageToAITutor}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: 'var(--bg-primary)',
-            borderRadius: '12px',
-            padding: '8px 12px',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
-            border: '1px solid var(--border-color)'
-          }}
-        >
-          <input
-            type="text"
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder="Ask your AI tutor..."
-            style={{
-              flex: 1,
-              border: 'none',
-              backgroundColor: 'transparent',
-              padding: '10px 16px',
-              borderRadius: '8px',
-              outline: 'none',
-              color: 'var(--text-primary)',
-              fontSize: '14px'
-            }}
-          />
-          <button
-            type="submit"
+        <div className="floating-chat-input" style={{
+          width: '100%',
+          display: 'flex',
+          justifyContent: 'center'
+        }}>
+          <form 
+            onSubmit={sendMessageToAITutor}
             style={{
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              width: '40px',
-              height: '40px',
-              backgroundColor: 'var(--highlight-color)',
-              color: 'white',
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer'
+              gap: '8px',
+              backgroundColor: 'var(--bg-primary)',
+              borderRadius: '12px',
+              padding: '10px 16px',
+              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)',
+              border: '1px solid var(--border-color)',
+              width: '100%'
             }}
           >
-            <Send size={16} />
-          </button>
-        </form>
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Ask your AI tutor..."
+              style={{
+                flex: 1,
+                border: 'none',
+                backgroundColor: 'transparent',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                outline: 'none',
+                color: 'var(--text-primary)',
+                fontSize: '14px'
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '40px',
+                height: '40px',
+                backgroundColor: 'var(--highlight-color)',
+                color: 'white',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              <Send size={16} />
+            </button>
+          </form>
+        </div>
       </div>
       
       {/* Right Sidebar - AI Tutor */}
