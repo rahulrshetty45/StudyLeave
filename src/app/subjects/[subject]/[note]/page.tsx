@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback, useMemo, KeyboardEvent, MouseEvent, ChangeEvent, DragEvent } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, KeyboardEvent, MouseEvent, ChangeEvent, DragEvent, createContext, useContext } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import AppLayout from '@/components/layout/AppLayout';
 import parse from 'html-react-parser';
@@ -36,7 +36,15 @@ import {
   ChevronUp,
   ChevronRight,
   Edit,
-  User
+  User,
+  Search,
+  FileSpreadsheet,
+  Menu,
+  PanelLeft,
+  Maximize2,
+  Minimize2,
+  BookOpen,
+  Wand2
 } from 'lucide-react';
 import { FaArrowLeft, FaLink, FaRegTrashAlt, FaSave, FaImage, FaCode, FaParagraph, FaListUl, FaHeading, FaQuoteLeft, FaStar, FaMarkdown, FaClipboard, FaTimes } from 'react-icons/fa';
 import { RiListOrdered } from 'react-icons/ri';
@@ -223,6 +231,69 @@ interface Position {
   left: number;
 }
 
+// Add a reusable Modal component for the subtopic dialog 
+interface ModalProps {
+  isOpen: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children }) => {
+  if (!isOpen) return null;
+  
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+    }}>
+      <div style={{
+        backgroundColor: 'var(--bg-primary)',
+        borderRadius: '8px',
+        width: '400px',
+        maxWidth: '90%',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+        padding: '16px',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '16px',
+        }}>
+          <h3 style={{
+            margin: 0,
+            fontSize: '18px',
+            fontWeight: '600',
+          }}>{title}</h3>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              padding: '4px',
+            }}
+          >
+            <X size={20} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+};
+
 export default function NotePage() {
   const params = useParams();
   const subject = params.subject as string;
@@ -279,6 +350,9 @@ export default function NotePage() {
   
   // Add this new state for tracking last cursor position
   const [lastCursorBlockId, setLastCursorBlockId] = useState<string | null>(null);
+  
+  const [showAddSubtopicDialog, setShowAddSubtopicDialog] = useState(false);
+  const [newSubtopicName, setNewSubtopicName] = useState('');
   
   // Initialize title and blocks from localStorage or defaults
   useEffect(() => {
@@ -2672,6 +2746,16 @@ Your explanation will be inserted directly into the user's notes.`
     return html;
   };
 
+  // Function to handle adding a new subtopic
+  const handleAddSubtopic = () => {
+    if (!newSubtopicName.trim()) return;
+    
+    // Implementation would go here - this is just for the UI fix
+    // Clear the input and close the dialog
+    setNewSubtopicName('');
+    setShowAddSubtopicDialog(false);
+  };
+
   return (
     <AppLayout>
       {/* Add animations to the head */}
@@ -3886,6 +3970,67 @@ Your explanation will be inserted directly into the user's notes.`
           animation: fadeIn 0.3s ease-in-out;
         }
       `}</style>
+
+      {/* Add Subtopic Modal */}
+      <Modal
+        isOpen={showAddSubtopicDialog}
+        title="Add New Subtopic"
+        onClose={() => setShowAddSubtopicDialog(false)}
+      >
+        <div>
+          <input
+            type="text"
+            value={newSubtopicName}
+            onChange={(e) => setNewSubtopicName(e.target.value)}
+            placeholder="Enter subtopic name"
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              fontSize: '14px',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              marginBottom: '16px',
+              background: 'var(--input-bg)',
+              color: 'var(--text-primary)',
+              boxSizing: 'border-box',
+            }}
+          />
+          <div style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '8px',
+          }}>
+            <button
+              onClick={() => setShowAddSubtopicDialog(false)}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                background: 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAddSubtopic}
+              style={{
+                padding: '8px 16px',
+                fontSize: '14px',
+                border: 'none',
+                borderRadius: '6px',
+                background: 'var(--highlight-color)',
+                color: 'white',
+                cursor: 'pointer',
+              }}
+            >
+              Add Subtopic
+            </button>
+          </div>
+        </div>
+      </Modal>
     </AppLayout>
   );
 } 

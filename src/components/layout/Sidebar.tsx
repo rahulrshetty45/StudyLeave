@@ -75,6 +75,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children }) => {
         maxWidth: '90%',
         boxShadow: 'var(--box-shadow)',
         padding: '16px',
+        overflow: 'hidden',
       }}>
         <div style={{
           display: 'flex',
@@ -977,6 +978,7 @@ export default function Sidebar({ activePage = 'dashboard' }: SidebarProps) {
               marginBottom: '16px',
               background: 'var(--input-bg)',
               color: 'var(--text-primary)',
+              boxSizing: 'border-box',
             }}
           />
           <div style={{
