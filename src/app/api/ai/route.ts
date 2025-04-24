@@ -35,7 +35,7 @@ export async function OPTIONS() {
 export async function POST(request: Request) {
   try {
     // Get messages from request body
-    const { messages } = await request.json();
+    const { messages, stream = false } = await request.json();
 
     // Log environment variables (excluding sensitive values)
     console.log('Environment check:', { 
@@ -67,10 +67,53 @@ export async function POST(request: Request) {
     console.log('Processing request:', {
       messageCount: messages.length,
       isNotesGeneration,
-      model: modelName
+      model: modelName,
+      streaming: stream
     });
 
-    // Generate AI response with appropriate parameters
+    // For streaming responses
+    if (stream) {
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+      
+      // Create a stream
+      const stream = new ReadableStream({
+        async start(controller) {
+          // Create OpenAI streaming completion
+          const completion = await openai.chat.completions.create({
+            model: modelName,
+            messages,
+            temperature: isNotesGeneration ? 0.5 : 0.7,
+            max_tokens: isNotesGeneration ? 2500 : 1000,
+            stream: true,
+          });
+
+          // Handle each chunk from the API
+          for await (const chunk of completion) {
+            const content = chunk.choices[0]?.delta?.content || '';
+            if (content) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+            }
+          }
+
+          // End the stream
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+
+      // Return the stream response
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          ...corsHeaders(),
+        },
+      });
+    }
+    
+    // For non-streaming responses (legacy support)
     const response = await openai.chat.completions.create({
       model: modelName,
       messages,

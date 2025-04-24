@@ -357,6 +357,15 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
+              onFocus={() => {
+                // Dispatch an event to remember the current cursor position
+                try {
+                  const event = new CustomEvent('rememberCursorPosition', {});
+                  window.dispatchEvent(event);
+                } catch (error) {
+                  console.error("Failed to dispatch rememberCursorPosition event:", error);
+                }
+              }}
               placeholder="Ask your AI tutor..."
               style={{
                 flex: 1,

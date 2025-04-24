@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, KeyboardEvent, MouseEvent, ChangeEvent, DragEvent } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import AppLayout from '@/components/layout/AppLayout';
 import parse from 'html-react-parser';
 import { 
@@ -33,7 +33,10 @@ import {
   Loader2,
   Trash2,
   Copy,
-  ChevronUp
+  ChevronUp,
+  ChevronRight,
+  Edit,
+  User
 } from 'lucide-react';
 import { FaArrowLeft, FaLink, FaRegTrashAlt, FaSave, FaImage, FaCode, FaParagraph, FaListUl, FaHeading, FaQuoteLeft, FaStar, FaMarkdown, FaClipboard, FaTimes } from 'react-icons/fa';
 import { RiListOrdered } from 'react-icons/ri';
@@ -41,7 +44,168 @@ import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { PiSpinnerGap } from 'react-icons/pi';
 import { LuExternalLink } from 'react-icons/lu';
-import { generateAIResponse, Message } from '@/lib/openai';
+import { generateAIResponse, Message, generateStreamingAIResponse } from '@/lib/openai';
+import { createPortal } from 'react-dom';
+
+// Define animations for dialog
+const animations = `
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.notes-dialog-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease-in-out;
+  box-sizing: border-box;
+}
+
+.notes-dialog {
+  background-color: #ffffff;
+  color: #333333;
+  border-radius: 8px;
+  padding: 20px;
+  width: 400px;
+  max-width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e0e0e0;
+  animation: scaleIn 0.2s ease-in-out;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes-dialog * {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+/* Dark mode styles */
+.dark .notes-dialog {
+  background-color: #1e1e1e;
+  color: #f5f5f5;
+  border-color: #2a2a2a;
+}
+
+.notes-dialog-title {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.dark .notes-dialog-title {
+  color: #f5f5f5;
+}
+
+.notes-dialog-text {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: #555555;
+}
+
+.dark .notes-dialog-text {
+  color: #cccccc;
+}
+
+.notes-dialog-textarea {
+  width: 100%;
+  height: 100px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  background-color: #f9f9f9;
+  color: #333333;
+  font-size: 14px;
+  resize: none;
+  outline: none;
+  margin-bottom: 16px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.dark .notes-dialog-textarea {
+  background-color: #2a2a2a;
+  border-color: #3a3a3a;
+  color: #f5f5f5;
+}
+
+.notes-dialog-button-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.notes-dialog-button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notes-dialog-button-cancel {
+  background-color: transparent;
+  color: #666666;
+  border: 1px solid #e0e0e0;
+}
+
+.dark .notes-dialog-button-cancel {
+  color: #cccccc;
+  border-color: #3a3a3a;
+}
+
+.notes-dialog-button-auto {
+  background-color: #e6f7ff;
+  color: #0066cc;
+  border: none;
+}
+
+.dark .notes-dialog-button-auto {
+  background-color: #193c5a;
+  color: #4da9ff;
+}
+
+.notes-dialog-button-generate {
+  background-color: #0066cc;
+  color: white;
+  border: none;
+}
+
+.notes-dialog-button-generate:disabled {
+  background-color: #cccccc;
+  color: #666666;
+  cursor: not-allowed;
+}
+
+.dark .notes-dialog-button-generate:disabled {
+  background-color: #3a3a3a;
+  color: #888888;
+}
+`;
 
 // Define block types
 type BlockType = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bulletList' | 'numberedList' | 'todo' | 'code' | 'quote' | 'divider' | 'aiResponse';
@@ -77,9 +241,13 @@ export default function NotePage() {
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [showNotesDialog, setShowNotesDialog] = useState(false);
+  const [notesPrompt, setNotesPrompt] = useState('');
   
   const titleRef = useRef<HTMLHeadingElement>(null);
   const blockRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
   
   // Add state to handle text selection
   const [selectedText, setSelectedText] = useState<string>('');
@@ -108,6 +276,9 @@ export default function NotePage() {
   
   // At the top of the component, add a state for the input
   const [aiQuestionInput, setAiQuestionInput] = useState('');
+  
+  // Add this new state for tracking last cursor position
+  const [lastCursorBlockId, setLastCursorBlockId] = useState<string | null>(null);
   
   // Initialize title and blocks from localStorage or defaults
   useEffect(() => {
@@ -239,6 +410,7 @@ export default function NotePage() {
   const handleFocus = (blockId: string) => {
     setIsTyping(true);
     setActiveBlock(blockId);
+    setLastCursorBlockId(blockId); // Store the block ID when focus happens
   };
   
   const handleBlur = (id: string, e: React.FocusEvent<HTMLDivElement>) => {
@@ -286,6 +458,11 @@ export default function NotePage() {
   
   // Handle key down in blocks for special actions
   const handleKeyDown = (id: string, e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Set this block as active
+    setActiveBlock(id);
+    // Also update the last cursor position
+    setLastCursorBlockId(id);
+    
     // Enter key - create new block
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1073,9 +1250,13 @@ export default function NotePage() {
   };
 
   // Add a function to generate content with AI
-  const generateAIContent = async () => {
+  const generateAIContent = async (customPrompt?: string) => {
+    // Create a typing indicator block ID at the outermost scope
+    const typingBlockId = generateId();
+    
     try {
       setIsGenerating(true);
+      setShowNotesDialog(false);
       
       // Format subject and note names for the prompt
       const formattedSubjectName = subject.split('-').map(word => 
@@ -1102,18 +1283,171 @@ Format your response with clear headers using Markdown:
 The notes will be saved in a note-taking application, so make them well-organized and useful for studying.`
       };
       
-      // Create a user message
+      // Create a user message, using any custom prompt if provided
       const userMessage: Message = {
         role: 'user',
-        content: `Please generate comprehensive study notes on "${formattedNoteName}" for my ${formattedSubjectName} class. Include all important concepts, definitions, and explanations.`
+        content: customPrompt || `Please generate comprehensive study notes on "${formattedNoteName}" for my ${formattedSubjectName} class. Include all important concepts, definitions, and explanations.`
       };
       
-      // Generate the response
-      const aiResponse = await generateAIResponse([systemMessage, userMessage]);
+      // Create a divider and a typing indicator block
+      const dividerBlock: Block = {
+        id: generateId(),
+        type: 'divider',
+        content: ''
+      };
       
-      if (typeof aiResponse === 'string') {
+      // Create a typing indicator block (using ID declared at the top)
+      const typingBlock: Block = {
+        id: typingBlockId,
+        type: 'paragraph',
+        content: ''
+      };
+      
+      // Add the divider and typing indicator to existing blocks
+      setBlocks(prevBlocks => {
+        const combinedBlocks = [...prevBlocks, dividerBlock, typingBlock];
+        localStorage.setItem(blocksKey, JSON.stringify(combinedBlocks));
+        return combinedBlocks;
+      });
+      
+      // Collect all content chunks to process at the end
+      let fullResponse = '';
+      let currentLine = '';
+      let lineBuffer: string[] = [];
+      
+      // Process each incoming chunk
+      const processChunk = (chunk: string) => {
+        // Add chunk to the full response
+        fullResponse += chunk;
+        
+        // Process the chunk by characters to create a more natural typing effect
+        for (let i = 0; i < chunk.length; i++) {
+          const char = chunk[i];
+          
+          // If it's a newline, add the current line to the buffer and reset
+          if (char === '\n') {
+            if (currentLine.trim() !== '') {
+              lineBuffer.push(currentLine);
+            }
+            currentLine = '';
+          } else {
+            // Add character to current line
+            currentLine += char;
+          }
+          
+          // Update the typing block with current progress
+          setBlocks(prevBlocks => {
+            const updatedBlocks = [...prevBlocks];
+            const typingIndex = updatedBlocks.findIndex(block => block.id === typingBlockId);
+            
+            if (typingIndex !== -1) {
+              // Determine proper block type based on current line (for proper formatting during typing)
+              let blockType: BlockType = 'paragraph';
+              let displayContent = [...lineBuffer, currentLine];
+              
+              // Apply formatting to each line
+              const formattedDisplayContent = displayContent.map(line => {
+                let formattedLine = line;
+                let lineType: BlockType = 'paragraph';
+                
+                // Determine line type based on its content
+                if (line.startsWith('# ')) {
+                  lineType = 'heading1';
+                  formattedLine = line.substring(2);
+                } else if (line.startsWith('## ')) {
+                  lineType = 'heading2';
+                  formattedLine = line.substring(3);
+                } else if (line.startsWith('### ')) {
+                  lineType = 'heading3';
+                  formattedLine = line.substring(4);
+                } else if (line.startsWith('- ')) {
+                  lineType = 'bulletList';
+                  formattedLine = line.substring(2);
+                } else if (line.match(/^\d+\.\s/)) {
+                  lineType = 'numberedList';
+                  formattedLine = line.replace(/^\d+\.\s/, '');
+                } else if (line.startsWith('> ')) {
+                  lineType = 'quote';
+                  formattedLine = line.substring(2);
+                } else if (line === '---') {
+                  lineType = 'divider';
+                  formattedLine = '';
+                }
+                
+                // Update the first line type to be the block type
+                if (line === displayContent[0]) {
+                  blockType = lineType;
+                }
+                
+                return {
+                  type: lineType,
+                  content: formattedLine
+                };
+              });
+              
+              // If last line is current one being typed, get its type
+              if (lineBuffer.length === 0 && currentLine) {
+                if (currentLine.startsWith('# ')) {
+                  blockType = 'heading1';
+                } else if (currentLine.startsWith('## ')) {
+                  blockType = 'heading2';
+                } else if (currentLine.startsWith('### ')) {
+                  blockType = 'heading3';
+                } else if (currentLine.startsWith('- ')) {
+                  blockType = 'bulletList';
+                } else if (currentLine.match(/^\d+\.\s/)) {
+                  blockType = 'numberedList';
+                } else if (currentLine.startsWith('> ')) {
+                  blockType = 'quote';
+                } else if (currentLine === '---') {
+                  blockType = 'divider';
+                }
+              }
+              
+              // Create HTML content that respects the line formats
+              const htmlContent = formattedDisplayContent.map(line => {
+                // Skip empty lines
+                if (!line.content.trim()) return '';
+                
+                // Format based on line type
+                switch(line.type) {
+                  case 'heading1':
+                    return `<h1 style="font-size: 1.8em; font-weight: 700; margin: 24px 0 12px 0;">${line.content}</h1>`;
+                  case 'heading2':
+                    return `<h2 style="font-size: 1.5em; font-weight: 600; margin: 20px 0 10px 0;">${line.content}</h2>`;
+                  case 'heading3':
+                    return `<h3 style="font-size: 1.3em; font-weight: 600; margin: 16px 0 8px 0;">${line.content}</h3>`;
+                  case 'bulletList':
+                    return `<div style="display: flex; margin: 4px 0;"><span style="margin-right: 8px;">•</span><span>${line.content}</span></div>`;
+                  case 'numberedList':
+                    // Simple handling for numbered lists during typing
+                    return `<div style="display: flex; margin: 4px 0;"><span style="margin-right: 8px;">-</span><span>${line.content}</span></div>`;
+                  case 'quote':
+                    return `<blockquote style="border-left: 3px solid #ccc; padding-left: 12px; margin: 8px 0; font-style: italic;">${line.content}</blockquote>`;
+                  case 'divider':
+                    return `<hr style="border: none; border-top: 1px solid #ddd; margin: 16px 0;" />`;
+                  default:
+                    return `<p style="margin: 8px 0;">${line.content}</p>`;
+                }
+              }).join('');
+              
+              // Update the block with the formatted content
+              updatedBlocks[typingIndex] = {
+                ...updatedBlocks[typingIndex],
+                type: blockType,
+                content: htmlContent
+              };
+            }
+            
+            return updatedBlocks;
+          });
+        }
+      };
+      
+      // Handle completion of the response
+      const handleComplete = (fullText: string) => {
         // Split the response into paragraphs
-        const contentLines = aiResponse.split('\n');
+        const contentLines = fullText.split('\n');
         
         // Create new blocks from the content
         const newBlocks: Block[] = contentLines.map(line => {
@@ -1149,7 +1483,7 @@ The notes will be saved in a note-taking application, so make them well-organize
           };
         }).filter(block => block.content !== ''); // Remove empty blocks
         
-        // If there are no blocks, add a default paragraph
+        // If there are no new blocks, add a default paragraph
         if (newBlocks.length === 0) {
           newBlocks.push({
             id: generateId(),
@@ -1158,13 +1492,35 @@ The notes will be saved in a note-taking application, so make them well-organize
           });
         }
         
-        // Set the new blocks
-        setBlocks(newBlocks);
-        localStorage.setItem(blocksKey, JSON.stringify(newBlocks));
-      }
+        // Replace the typing block with properly formatted blocks
+        setBlocks(prevBlocks => {
+          // Find and remove the typing indicator block
+          const withoutTyping = prevBlocks.filter(block => block.id !== typingBlockId);
+          
+          // Combine existing blocks with new blocks (typing block is already removed)
+          const combinedBlocks = [...withoutTyping, ...newBlocks];
+          localStorage.setItem(blocksKey, JSON.stringify(combinedBlocks));
+          return combinedBlocks;
+        });
+        
+        // Finish generating
+        setIsGenerating(false);
+      };
+      
+      // Use the streaming API
+      await generateStreamingAIResponse(
+        [systemMessage, userMessage],
+        processChunk,
+        handleComplete
+      );
+      
     } catch (error) {
       console.error('Error generating AI content:', error);
-    } finally {
+      // Remove the typing indicator block on error
+      setBlocks(prevBlocks => {
+        const withoutTyping = prevBlocks.filter(block => block.id !== typingBlockId);
+        return withoutTyping;
+      });
       setIsGenerating(false);
     }
   };
@@ -1185,41 +1541,200 @@ The notes will be saved in a note-taking application, so make them well-organize
     const formattedSubject = formatSubjectName(subjectParam);
     const formattedNote = title || "this note";
     
+    // Declare loadingBlock at function scope so it's accessible in the catch block
+    let loadingBlock: Block | null = null;
+    
     try {
-      // First dispatch the event to the AI Tutor - send to one place only
-      // This ensures the explanation only appears in the chat, not in the popup
-      const explainEvent = new CustomEvent('explainText', {
-        detail: {
-          text: selectedText,
-          source: `${formattedSubject} (${formattedNote})`,
-          id: Date.now()
+      // Get current selection to find the block containing the selection
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount) {
+        console.log("No selection found");
+        return;
+      }
+      
+      // Find the block containing the selection
+      const range = selection.getRangeAt(0);
+      const node = range.startContainer;
+      let blockElement: Element | null = null;
+      let currentNode: Node | null = node;
+      
+      // Traverse up the DOM to find the block element with data-block-id attribute
+      while (currentNode && !blockElement) {
+        if (currentNode.nodeType === Node.ELEMENT_NODE) {
+          const element = currentNode as Element;
+          if (element.hasAttribute('data-block-id')) {
+            blockElement = element;
+            break;
+          }
         }
+        currentNode = currentNode.parentNode;
+      }
+      
+      if (!blockElement) {
+        console.log("Could not find block containing the selection");
+        setDebugInfo("Could not find block containing the selection");
+        setIsExplaining(false);
+        return;
+      }
+      
+      // Get the block ID
+      const blockId = blockElement.getAttribute('data-block-id');
+      if (!blockId) {
+        console.log("Block element doesn't have a block ID");
+        setIsExplaining(false);
+        return;
+      }
+      
+      // Create a temporary loading block to show while generating the explanation
+      loadingBlock = {
+        id: generateId(),
+        type: 'aiResponse',
+        content: `<div style="color: var(--text-tertiary, #6b7280); line-height: 1.6; display: flex; align-items: center; padding-left: 16px; border-left: 3px solid var(--text-tertiary, #6b7280);">
+          <div class="loading-dots">Generating explanation<span>.</span><span>.</span><span>.</span></div>
+        </div>
+        <style>
+          .loading-dots span {
+            animation: loadingDots 1.4s infinite;
+            opacity: 0;
+          }
+          .loading-dots span:nth-child(1) {
+            animation-delay: 0s;
+          }
+          .loading-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+          }
+          .loading-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+          }
+          @keyframes loadingDots {
+            0% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 0; }
+          }
+        </style>`
+      };
+      
+      // Insert the loading block after the block containing the selection
+      setBlocks(prevBlocks => {
+        const blockIndex = prevBlocks.findIndex(block => block.id === blockId);
+        if (blockIndex === -1) return prevBlocks;
+        
+        const newBlocks = [...prevBlocks];
+        // Check if loadingBlock is not null before adding it
+        if (loadingBlock) {
+          newBlocks.splice(blockIndex + 1, 0, loadingBlock);
+          
+          // Scroll to the loading block
+          setTimeout(() => {
+            const loadingElement = document.querySelector(`[data-block-id="${loadingBlock?.id}"]`);
+            if (loadingElement) {
+              loadingElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 100);
+        }
+        
+        return newBlocks;
       });
       
-      // Dispatch only once to window
-      window.dispatchEvent(explainEvent);
-      console.log(`Event dispatched at ${new Date().toISOString()}`);
+      // Create a system message that explains what to do
+      const systemMessage: Message = {
+        role: 'system',
+        content: `You are an expert tutor explaining the following text from ${formattedSubject} (${formattedNote}). 
+        
+Your explanation MUST follow this structured format:
+1. Start with a "Summary" section that briefly explains the concept in 2-3 sentences
+2. Include a "Key Points" section with bullet points highlighting the most important aspects
+3. Add a "Detailed Explanation" section that breaks down the concept step by step
+4. If relevant, include a "Formula/Equations" section for mathematical concepts
+5. End with a "Why It Matters" section to explain the significance of the concept
+
+Use bold headings for each section (e.g., **Summary:**) and bullet points (•) for lists.
+Keep your explanation educational, clear, and well-organized.
+Your explanation will be inserted directly into the user's notes.`
+      };
       
-      // Skip the local explanation popup entirely - only use AI Tutor
-      // This solves the problem of potentially duplicating API calls
+      // Create the message with the text to explain
+      const userMessage: Message = {
+        role: 'user',
+        content: `Please explain this text: "${selectedText}"`
+      };
       
-      // Save to localStorage as fallback for the AI Tutor
-      localStorage.setItem('pendingExplanation', JSON.stringify({
-        text: selectedText,
-        source: `${formattedSubject} (${formattedNote})`,
-        timestamp: Date.now(),
-        id: explainEvent.detail.id
-      }));
+      // Use streaming response for the typing effect
+      let currentExplanation = '';
       
-      // Clear selection
-      window.getSelection()?.removeAllRanges();
-      setDebugInfo(`Explanation request sent to AI Tutor`);
+      // Process each incoming chunk as it arrives
+      const processChunk = (chunk: string) => {
+        currentExplanation += chunk;
+        
+        // Format the explanation with the processor
+        const formattedResponse = processMarkdown(currentExplanation);
+        
+        // Update the loading block with the current explanation
+        setBlocks(prevBlocks => {
+          const blockIndex = prevBlocks.findIndex(block => block.id === loadingBlock?.id);
+          if (blockIndex === -1) return prevBlocks;
+          
+          const newBlocks = [...prevBlocks];
+          newBlocks[blockIndex] = {
+            ...newBlocks[blockIndex],
+            content: `<div style="color: var(--text-tertiary, #6b7280); line-height: 1.6; padding-left: 16px; border-left: 3px solid var(--text-tertiary, #6b7280);">${formattedResponse}</div>`
+          };
+          
+          return newBlocks;
+        });
+      };
+      
+      // Process completion of the explanation
+      const handleComplete = (fullExplanation: string) => {
+        // Format the explanation with the processor
+        const formattedResponse = processMarkdown(fullExplanation);
+        
+        // Update the block with the final formatted explanation
+        setBlocks(prevBlocks => {
+          const blockIndex = prevBlocks.findIndex(block => block.id === loadingBlock?.id);
+          if (blockIndex === -1) return prevBlocks;
+          
+          const newBlocks = [...prevBlocks];
+          newBlocks[blockIndex] = {
+            ...newBlocks[blockIndex],
+            type: 'aiResponse',
+            content: `<div style="color: var(--text-tertiary, #6b7280); line-height: 1.6; padding-left: 16px; border-left: 3px solid var(--text-tertiary, #6b7280);">${formattedResponse}</div>`
+          };
+          
+          return newBlocks;
+        });
+        
+        // Reset the explaining state after a delay
+        setTimeout(() => {
+          setIsExplaining(false);
+        }, 1000);
+      };
+      
+      // Generate explanation using streaming API
+      await generateStreamingAIResponse(
+        [systemMessage, userMessage],
+        processChunk,
+        handleComplete
+      );
+      
     } catch (error) {
-      console.error("Error dispatching explanation event:", error);
+      console.error("Error generating explanation:", error);
       if (error instanceof Error) {
         setDebugInfo(`Error: ${error.message}`);
       }
-    } finally {
+      
+      // Remove the loading block if there was an error
+      if (loadingBlock) {
+        setBlocks(prevBlocks => {
+          const loadingIndex = prevBlocks.findIndex(block => block.id === loadingBlock?.id);
+          if (loadingIndex === -1) return prevBlocks;
+          
+          const newBlocks = [...prevBlocks];
+          newBlocks.splice(loadingIndex, 1);
+          return newBlocks;
+        });
+      }
+      
       // Reset explanation state after a delay
       setTimeout(() => {
         setIsExplaining(false);
@@ -1630,8 +2145,38 @@ The notes will be saved in a note-taking application, so make them well-organize
       generateInPageResponse(message);
     };
     
-    // Listen for the custom event
+    // Handler for remembering cursor position when clicking on the bottom input
+    const handleRememberCursorPosition = () => {
+      // Get the current selection
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const node = range.startContainer;
+        
+        // Find the closest parent block element with data-block-id
+        let currentNode: Node | null = node;
+        while (currentNode) {
+          if (currentNode.nodeType === Node.ELEMENT_NODE) {
+            const element = currentNode as Element;
+            const blockId = element.getAttribute('data-block-id');
+            if (blockId) {
+              console.log("Stored cursor position at block:", blockId);
+              setLastCursorBlockId(blockId);
+              break;
+            }
+          }
+          currentNode = currentNode.parentNode;
+        }
+      } else if (activeBlock) {
+        // If no selection but we have an active block, use that
+        console.log("No selection found, using active block:", activeBlock);
+        setLastCursorBlockId(activeBlock);
+      }
+    };
+    
+    // Listen for the custom events
     window.addEventListener('inPageMessage', handleInPageMessage as EventListener);
+    window.addEventListener('rememberCursorPosition', handleRememberCursorPosition as EventListener);
     
     // Scroll to bottom when messages change
     if (inPageChatRef.current) {
@@ -1640,17 +2185,99 @@ The notes will be saved in a note-taking application, so make them well-organize
     
     return () => {
       window.removeEventListener('inPageMessage', handleInPageMessage as EventListener);
+      window.removeEventListener('rememberCursorPosition', handleRememberCursorPosition as EventListener);
     };
-  }, [inPageMessages]); // Depend on inPageMessages to scroll to bottom on new messages
+  }, [inPageMessages, activeBlock]); // Keep minimal dependencies to avoid circular references
   
   // Function to generate AI response for in-page chat
   const generateInPageResponse = async (userMessage: string) => {
+    // Create a variable outside the try/catch so it's accessible in both blocks
+    let insertedLoadingBlockId: string | null = null;
+    
     try {
       setIsInPageLoading(true);
       
       // Format context for better responses
       const formattedSubjectName = formatSubjectName(subject);
       const noteContext = `Note: "${title}" in subject "${formattedSubjectName}"`;
+      
+      // First add the user's question as a block with HTML - using a green color instead of blue
+      const questionBlock: Block = {
+        id: generateId(),
+        type: 'paragraph',
+        content: `<div style="display: inline-block; padding: 8px 16px; background-color: #f0fff5; border: 2px solid #4CAF50; border-radius: 20px; color: var(--text-primary); font-weight: 500; margin: 10px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-style: normal;">${userMessage}</div>`
+      };
+      
+      // Create a typing block to show the response as it comes in
+      const typingBlockId = generateId();
+      const typingBlock: Block = {
+        id: typingBlockId,
+        type: 'aiResponse',
+        content: `<div style="color: var(--text-tertiary, #6b7280); line-height: 1.6; font-style: italic;">&nbsp;</div>`
+      };
+      
+      // Store the typing block ID for error handling
+      insertedLoadingBlockId = typingBlockId;
+      
+      let insertedAtIndex = -1;
+      
+      // Insert question and typing block immediately
+      setBlocks(prevBlocks => {
+        const newBlocks = [...prevBlocks];
+        
+        // First check if we have a stored cursor position block
+        if (lastCursorBlockId) {
+          const cursorIndex = newBlocks.findIndex(block => block.id === lastCursorBlockId);
+          if (cursorIndex !== -1) {
+            // Insert question followed by typing block after the cursor block
+            insertedAtIndex = cursorIndex + 1;
+            newBlocks.splice(insertedAtIndex, 0, questionBlock, typingBlock);
+            
+            // Schedule scrolling to the typing block
+            setTimeout(() => {
+              const typingElement = document.querySelector(`[data-block-id="${typingBlockId}"]`);
+              if (typingElement) {
+                typingElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 100);
+            
+            return newBlocks;
+          }
+        }
+        
+        // Fall back to active block if cursor block not found
+        if (activeBlock) {
+          const activeIndex = newBlocks.findIndex(block => block.id === activeBlock);
+          if (activeIndex !== -1) {
+            insertedAtIndex = activeIndex + 1;
+            newBlocks.splice(insertedAtIndex, 0, questionBlock, typingBlock);
+            
+            // Schedule scrolling
+            setTimeout(() => {
+              const typingElement = document.querySelector(`[data-block-id="${typingBlockId}"]`);
+              if (typingElement) {
+                typingElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 100);
+            
+            return newBlocks;
+          }
+        }
+        
+        // If no cursor position or active block found, append to the end
+        insertedAtIndex = newBlocks.length;
+        newBlocks.push(questionBlock, typingBlock);
+        
+        // Schedule scrolling
+        setTimeout(() => {
+          const typingElement = document.querySelector(`[data-block-id="${typingBlockId}"]`);
+          if (typingElement) {
+            typingElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
+        
+        return newBlocks;
+      });
       
       // Create a system message that gives context about the note
       const systemMessage: Message = {
@@ -1674,11 +2301,149 @@ The notes will be saved in a note-taking application, so make them well-organize
         content: userMessage
       };
       
-      // Generate response
-      const aiResponse = await generateAIResponse([systemMessage, apiUserMessage]);
+      // Variables to hold the response as it comes in
+      let fullResponse = '';
       
+      // Function to process each chunk of the response
+      const processChunk = (chunk: string) => {
+        // Add chunk to full response
+        fullResponse += chunk;
+        
+        // Format the partial response
+        let formattedPartialResponse = formatInPageResponse(fullResponse);
+        
+        // Update the typing block with current content
+        setBlocks(prevBlocks => {
+          const updatedBlocks = [...prevBlocks];
+          const typingIndex = updatedBlocks.findIndex(block => block.id === typingBlockId);
+          
+          if (typingIndex !== -1) {
+            updatedBlocks[typingIndex] = {
+              ...updatedBlocks[typingIndex],
+              content: formattedPartialResponse
+            };
+          }
+          
+          return updatedBlocks;
+        });
+        
+        // Add the partial response to the chat as well (for a smooth typing effect in the chat)
+        const aiPartialMessage = {
+          id: Date.now(),
+          text: fullResponse,
+          sender: 'ai' as const,
+          isPartial: true
+        };
+        
+        setInPageMessages(prev => {
+          // Remove any previous partial messages
+          const filteredMessages = prev.filter(msg => !('isPartial' in msg));
+          return [...filteredMessages, aiPartialMessage];
+        });
+        
+        // Scroll chat to bottom
+        requestAnimationFrame(() => {
+          if (inPageChatRef.current) {
+            inPageChatRef.current.scrollTop = inPageChatRef.current.scrollHeight;
+          }
+        });
+      };
+      
+      // Function to handle completion of the response
+      const handleComplete = (finalText: string) => {
+        // Format the final response
+        const formattedFinalResponse = formatInPageResponse(finalText);
+        
+        // Update the typing block with final content
+        setBlocks(prevBlocks => {
+          const updatedBlocks = [...prevBlocks];
+          const typingIndex = updatedBlocks.findIndex(block => block.id === typingBlockId);
+          
+          if (typingIndex !== -1) {
+            updatedBlocks[typingIndex] = {
+              ...updatedBlocks[typingIndex],
+              content: formattedFinalResponse
+            };
+          }
+          
+          return updatedBlocks;
+        });
+        
+        // Add the final message to the chat, replacing any partial messages
+        const aiFinalMessage = {
+          id: Date.now(),
+          text: finalText,
+          sender: 'ai' as const
+        };
+        
+        setInPageMessages(prev => {
+          // Remove any partial messages
+          const filteredMessages = prev.filter(msg => !('isPartial' in msg));
+          return [...filteredMessages, aiFinalMessage];
+        });
+        
+        // Save the updated blocks to localStorage
+        setTimeout(() => {
+          localStorage.setItem(blocksKey, JSON.stringify(blocks));
+        }, 100);
+        
+        setIsInPageLoading(false);
+        
+        // Scroll chat to bottom
+        requestAnimationFrame(() => {
+          if (inPageChatRef.current) {
+            inPageChatRef.current.scrollTop = inPageChatRef.current.scrollHeight;
+          }
+        });
+      };
+      
+      // Use the streaming API
+      await generateStreamingAIResponse(
+        [systemMessage, apiUserMessage],
+        processChunk,
+        handleComplete
+      );
+      
+    } catch (error) {
+      console.error('Error generating in-page response:', error);
+      
+      // If there was a typing block, replace it with an error message
+      if (insertedLoadingBlockId) {
+        setBlocks(prevBlocks => {
+          const newBlocks = [...prevBlocks];
+          const loadingIndex = newBlocks.findIndex(block => block.id === insertedLoadingBlockId);
+          
+          if (loadingIndex !== -1) {
+            // Replace with error message
+            newBlocks[loadingIndex] = {
+              id: generateId(),
+              type: 'aiResponse',
+              content: "<div style='color: var(--text-tertiary, #6b7280); line-height: 1.6; font-style: italic;'>I'm sorry, I encountered an error while generating a response.</div>"
+            };
+          }
+          
+          return newBlocks;
+        });
+      }
+      
+      // Add error message to chat
+      setInPageMessages(prev => [
+        ...prev.filter(msg => !('isPartial' in msg)), // Remove any partial messages
+        {
+          id: Date.now(),
+          text: "I'm sorry, I encountered an error while generating a response.",
+          sender: 'ai' as const
+        }
+      ]);
+      
+      setIsInPageLoading(false);
+    }
+  };
+
+  // Helper function to format in-page chat responses
+  const formatInPageResponse = (text: string): string => {
       // Process the response to convert markdown-like formatting to HTML
-      let formattedResponse = aiResponse || "I'm sorry, I couldn't generate a response.";
+    let formattedResponse = text || "I'm sorry, I couldn't generate a response.";
       
       // Add line breaks to ensure proper regex matching (but keep paragraphs intact)
       formattedResponse = formattedResponse.replace(/\n\n+/g, '\n\n');
@@ -1738,10 +2503,12 @@ The notes will be saved in a note-taking application, so make them well-organize
       }).join('');
       
       // Fix any remaining single paragraphs
-      formattedResponse.split('\n').forEach(line => {
-        if (line.trim() && !line.trim().match(/^<(h[2-4]|ul|ol|p|li)/)) {
-          formattedResponse = formattedResponse.replace(line, `<p style="margin-bottom: 12px; font-style: italic;">${line}</p>`);
-        }
+    formattedResponse = formattedResponse.replace(/(?:^|\n)([^<\n][^\n]+)(?:\n|$)/g, function(match, para) {
+      // Skip if it already looks like HTML
+      if (para.trim().startsWith('<')) {
+        return match;
+      }
+      return `<p style="margin-bottom: 12px; font-style: italic;">${para.trim()}</p>`;
       });
       
       // Clean up any duplicated or nested paragraphs
@@ -1754,59 +2521,162 @@ The notes will be saved in a note-taking application, so make them well-organize
       // Wrap in a container div for consistent styling
       formattedResponse = `<div style="color: var(--text-tertiary, #6b7280); line-height: 1.6; font-style: italic;">${formattedResponse}</div>`;
       
-      // First add the user's question as a block with HTML - using a green color instead of blue
-      const questionBlock: Block = {
-        id: generateId(),
-        type: 'paragraph',
-        content: `<div style="display: inline-block; padding: 8px 16px; background-color: #f0fff5; border: 2px solid #4CAF50; border-radius: 20px; color: var(--text-primary); font-weight: 500; margin: 10px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-style: normal;">${userMessage}</div>`
-      };
-      
-      // Then create the AI response block which will be styled by its block type
-      const responseBlock: Block = {
-        id: generateId(),
-        type: 'aiResponse',
-        content: formattedResponse
-      };
-      
-      // Insert both blocks after the active block or at the end
-      setBlocks(prevBlocks => {
-        const newBlocks = [...prevBlocks];
-        if (activeBlock) {
-          const activeIndex = newBlocks.findIndex(block => block.id === activeBlock);
-          if (activeIndex !== -1) {
-            // Insert question followed by response
-            newBlocks.splice(activeIndex + 1, 0, questionBlock, responseBlock);
-            return newBlocks;
-          }
-        }
-        // If no active block or not found, append to the end
-        return [...newBlocks, questionBlock, responseBlock];
+    return formattedResponse;
+  };
+
+  // Add focus management for dialog
+  useEffect(() => {
+    if (showNotesDialog && promptInputRef.current) {
+      promptInputRef.current.focus();
+    }
+  }, [showNotesDialog]);
+
+  // Handle Escape key to close dialog
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showNotesDialog) {
+        setShowNotesDialog(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown as any);
+    return () => window.removeEventListener('keydown', handleKeyDown as any);
+  }, [showNotesDialog]);
+
+  // Helper function to process markdown to HTML for better display
+  const processMarkdown = (text: string): string => {
+    // Replace markdown headings
+    let html = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Replace bullet points
+    html = html.replace(/^- (.*?)$/gm, '<li>$1</li>');
+    html = html.replace(/^• (.*?)$/gm, '<li>$1</li>');
+    html = html.replace(/^([•*]) (.*?)$/gm, '<li>$2</li>');
+    
+    // Wrap lists - using a different approach without 's' flag
+    const listItemRegex = /<li>.*?<\/li>/g;
+    const listItems = html.match(listItemRegex);
+    
+    if (listItems) {
+      // Replace all list items with a temporary marker
+      let tempHtml = html;
+      listItems.forEach((item, index) => {
+        tempHtml = tempHtml.replace(item, `LIST_ITEM_${index}`);
       });
       
-      // Save the updated blocks to localStorage
-      setTimeout(() => {
-        localStorage.setItem(blocksKey, JSON.stringify(blocks));
-      }, 100);
+      // Find groups of list items
+      const listGroups: string[][] = [];
+      let currentGroup: string[] = [];
       
-    } catch (error) {
-      console.error('Error generating in-page response:', error);
+      for (let i = 0; i < listItems.length; i++) {
+        const marker = `LIST_ITEM_${i}`;
+        const nextMarker = `LIST_ITEM_${i+1}`;
+        
+        currentGroup.push(listItems[i]);
+        
+        // Check if this is the last item or if the next item is not adjacent
+        const isLastItem = i === listItems.length - 1;
+        const notAdjacent = isLastItem || 
+          tempHtml.indexOf(nextMarker) - (tempHtml.indexOf(marker) + marker.length) > 10;
+        
+        if (notAdjacent) {
+          listGroups.push([...currentGroup]);
+          currentGroup = [];
+        }
+      }
       
-      // Add error message as a block
-      const errorBlock: Block = {
-        id: generateId(),
-        type: 'aiResponse',
-        content: "<p style='margin-bottom: 12px;'>I'm sorry, I encountered an error while trying to respond.</p>"
-      };
+      // Replace each group with a <ul> wrapped list
+      for (let group of listGroups) {
+        const groupHtml = group.join('\n');
+        const wrappedGroupHtml = `<ul>\n${groupHtml}\n</ul>`;
+        
+        // Replace the first item's marker with the whole wrapped group
+        const firstItemIndex = group[0] === listItems[0] ? 0 : listItems.indexOf(group[0]);
+        const firstMarker = `LIST_ITEM_${firstItemIndex}`;
+        
+        // Remove other items' markers
+        for (let i = 1; i < group.length; i++) {
+          const itemIndex = listItems.indexOf(group[i]);
+          const itemMarker = `LIST_ITEM_${itemIndex}`;
+          tempHtml = tempHtml.replace(itemMarker, '');
+        }
+        
+        // Replace the first marker with the wrapped group
+        tempHtml = tempHtml.replace(firstMarker, wrappedGroupHtml);
+      }
       
-      setBlocks(prevBlocks => [...prevBlocks, errorBlock]);
-      
-    } finally {
-      setIsInPageLoading(false);
+      html = tempHtml;
     }
+    
+    // Process section headers (e.g., "**Summary:**")
+    html = html.replace(/<strong>(.*?):<\/strong>/g, '<h3>$1</h3>');
+    
+    // Apply colors to specific headings (Summary, Key Points, etc.)
+    html = html.replace(/<h3>Summary<\/h3>/g, '<h3 class="explanation-heading">Summary</h3>');
+    html = html.replace(/<h3>Key Points<\/h3>/g, '<h3 class="explanation-heading">Key Points</h3>');
+    html = html.replace(/<h3>Detailed Explanation<\/h3>/g, '<h3 class="explanation-heading">Detailed Explanation</h3>');
+    html = html.replace(/<h3>Formula\/Equations<\/h3>/g, '<h3 class="explanation-heading">Formula/Equations</h3>');
+    html = html.replace(/<h3>Why It Matters<\/h3>/g, '<h3 class="explanation-heading">Why It Matters</h3>');
+    
+    // Process paragraphs - simpler approach
+    const lines = html.split('\n');
+    const processedLines = lines.map(line => {
+      // Skip lines that already have HTML tags
+      if (line.trim().startsWith('<') && !line.trim().startsWith('</')) {
+        return line;
+      }
+      // Skip empty lines
+      if (!line.trim()) {
+        return line;
+      }
+      return `<p>${line}</p>`;
+    });
+    
+    html = processedLines.join('\n');
+    
+    // Fix any empty paragraphs
+    html = html.replace(/<p>\s*<\/p>/g, '');
+    
+    // Fix any consecutive paragraph tags
+    html = html.replace(/<\/p>\s*<p>/g, '</p><p>');
+    
+    // Add special styles for formatting
+    html = `${html}
+    <style>
+      .structured-explanation h3 {
+        font-weight: 600;
+        margin-top: 16px;
+        margin-bottom: 8px;
+        color: var(--text-primary);
+      }
+      .structured-explanation .explanation-heading {
+        font-weight: 700;
+        font-size: 1.1em;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 4px;
+        display: inline-block;
+      }
+      .structured-explanation ul {
+        margin-left: 20px;
+        list-style-type: disc;
+        margin-bottom: 12px;
+      }
+      .structured-explanation li {
+        margin-bottom: 4px;
+      }
+      .structured-explanation p {
+        margin-bottom: 8px;
+      }
+    </style>`;
+    
+    return html;
   };
 
   return (
     <AppLayout>
+      {/* Add animations to the head */}
+      <style dangerouslySetInnerHTML={{ __html: animations }} />
+      
       <div style={{
         maxWidth: '800px',
         margin: '0 auto',
@@ -1858,51 +2728,9 @@ The notes will be saved in a note-taking application, so make them well-organize
             display: 'flex',
             gap: '10px'
           }}>
-            {/* Manual Explain Button */}
+            {/* Manual Explain Button - Removed */}
             <button
-              onClick={() => {
-                const selectedText = window.getSelection()?.toString().trim() || '';
-                if (selectedText.length > 0) {
-                  console.log("Manual explain button clicked with selection:", selectedText);
-                  setSelectedText(selectedText);
-                  handleExplainText();
-                } else {
-                  setDebugInfo("Please select some text first");
-                  setTimeout(() => setDebugInfo(''), 3000);
-                }
-              }}
-              disabled={isExplaining}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                backgroundColor: isExplaining ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-                fontSize: '14px',
-                fontWeight: '500',
-                border: 'none',
-                cursor: isExplaining ? 'not-allowed' : 'pointer',
-                opacity: isExplaining ? 0.7 : 1,
-                transition: 'background-color 0.2s ease'
-              }}
-            >
-              {isExplaining ? (
-                <>
-                  <PiSpinnerGap className="animate-spin" size={16} />
-                  <span>Processing...</span>
-                </>
-              ) : (
-                <>
-                  <FaStar size={14} />
-                  <span>Explain Selection</span>
-                </>
-              )}
-            </button>
-            
-            <button
-              onClick={generateAIContent}
+              onClick={() => setShowNotesDialog(true)}
               disabled={isGenerating}
               style={{
                 display: 'flex',
@@ -2051,6 +2879,65 @@ The notes will be saved in a note-taking application, so make them well-organize
           Last edited now
         </div>
         
+        {/* AI Notes Dialog */}
+        {showNotesDialog && typeof document !== 'undefined' && createPortal(
+          <div
+            className="notes-dialog-container"
+            onClick={() => setShowNotesDialog(false)}
+            role="dialog"
+            aria-labelledby="notes-dialog-title"
+            aria-modal="true"
+          >
+            <div
+              ref={dialogRef}
+              className="notes-dialog"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ marginBottom: '16px', width: '100%' }}>
+                <h3 
+                  id="notes-dialog-title"
+                  className="notes-dialog-title"
+                >
+                  Generate Notes
+                </h3>
+                <p className="notes-dialog-text">
+                  What kind of notes would you like to generate?
+                </p>
+                <textarea
+                  ref={promptInputRef}
+                  value={notesPrompt}
+                  onChange={(e) => setNotesPrompt(e.target.value)}
+                  placeholder="E.g., 'Key concepts with examples', 'Comprehensive notes with diagrams', 'Simple summary with bullet points'..."
+                  className="notes-dialog-textarea"
+                />
+              </div>
+              <div className="notes-dialog-button-container">
+                <button
+                  onClick={() => setShowNotesDialog(false)}
+                  className="notes-dialog-button notes-dialog-button-cancel"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => generateAIContent()}
+                  className="notes-dialog-button notes-dialog-button-auto"
+                >
+                  <Sparkles size={16} style={{ marginRight: '6px' }} />
+                  Autogenerate
+                </button>
+                <button
+                  onClick={() => generateAIContent(notesPrompt)}
+                  disabled={!notesPrompt.trim()}
+                  className="notes-dialog-button notes-dialog-button-generate"
+                >
+                  Generate
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+        
         {/* Selection tooltip */}
         {showSelectionTooltip && (
           <div 
@@ -2136,6 +3023,51 @@ The notes will be saved in a note-taking application, so make them well-organize
             }}>
               FORMAT TEXT
             </div>
+            
+            {/* AI Explanation Button */}
+            <button
+              onClick={() => {
+                handleExplainText();
+                setShowContextMenu(false);
+              }}
+              disabled={isExplaining}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 12px',
+                margin: '0 8px 8px 8px',
+                borderRadius: '4px',
+                cursor: isExplaining ? 'not-allowed' : 'pointer',
+                backgroundColor: 'var(--bg-tertiary)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-primary)',
+                textAlign: 'left',
+                fontSize: '13px',
+                width: 'calc(100% - 16px)',
+                opacity: isExplaining ? 0.7 : 1
+              }}
+              onMouseEnter={(e) => {
+                if (!isExplaining) e.currentTarget.style.backgroundColor = 'var(--hover-bg)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)';
+              }}
+            >
+              {isExplaining ? (
+                <>
+                  <PiSpinnerGap className="animate-spin" size={16} /> 
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <FaStar size={14} style={{ color: 'var(--primary-color)' }} /> 
+                  Explain with AI
+                </>
+              )}
+            </button>
+            
+            <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '0 8px 8px 8px' }} />
             
             {/* Primary Formatting Options */}
             <div style={{
@@ -2671,7 +3603,7 @@ The notes will be saved in a note-taking application, so make them well-organize
                       borderRadius: '4px',
                       border: '1px solid var(--border-color)',
                       backgroundColor: 'transparent',
-                      fontFamily: 'Segoe Script, Bradley Hand, cursive',
+                      fontFamily: 'Segoe Script, Bradley Hand, Chilanka, cursive',
                       fontSize: '12px',
                       cursor: 'pointer',
                       color: 'var(--text-primary)'
