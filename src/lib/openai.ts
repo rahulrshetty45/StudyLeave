@@ -224,6 +224,37 @@ export async function generateStreamingAIResponse(
       let buffer = '';
       
       try {
+        // Define the function to process event stream chunks
+        const processEventStreamChunk = (chunk: string) => {
+          const lines = chunk.split('\n');
+          
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.startsWith('data: ')) {
+              const data = line.substring(6);
+              
+              // Check if the stream is done
+              if (data === '[DONE]') {
+                onComplete(fullText);
+                return;
+              }
+              
+              try {
+                const parsedData = JSON.parse(data);
+                if (parsedData.content) {
+                  fullText += parsedData.content;
+                  onChunk(parsedData.content);
+                } else if (parsedData.error) {
+                  console.error('Error in stream data:', parsedData.error);
+                  throw new Error(parsedData.error);
+                }
+              } catch (e) {
+                console.error('Error parsing JSON from stream:', e, 'Data:', data);
+              }
+            }
+          }
+        };
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
@@ -237,37 +268,6 @@ export async function generateStreamingAIResponse(
           // Decode the chunk and add to buffer
           const text = decoder.decode(value, { stream: true });
           buffer += text;
-          
-          // Process complete events in the buffer
-          const processEventStreamChunk = (chunk: string) => {
-            const lines = chunk.split('\n');
-            
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i].trim();
-              if (line.startsWith('data: ')) {
-                const data = line.substring(6);
-                
-                // Check if the stream is done
-                if (data === '[DONE]') {
-                  onComplete(fullText);
-                  return;
-                }
-                
-                try {
-                  const parsedData = JSON.parse(data);
-                  if (parsedData.content) {
-                    fullText += parsedData.content;
-                    onChunk(parsedData.content);
-                  } else if (parsedData.error) {
-                    console.error('Error in stream data:', parsedData.error);
-                    throw new Error(parsedData.error);
-                  }
-                } catch (e) {
-                  console.error('Error parsing JSON from stream:', e, 'Data:', data);
-                }
-              }
-            }
-          };
           
           // Find complete events (separated by double newlines)
           let eventEnd = buffer.indexOf('\n\n');
