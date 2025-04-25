@@ -41,7 +41,8 @@ export async function POST(request: Request) {
     console.log('Environment check:', { 
       modelNameExists: !!modelName,
       apiKeyExists: !!openaiApiKey,
-      nodeEnv: process.env.NODE_ENV
+      nodeEnv: process.env.NODE_ENV,
+      hasReadableStream: typeof ReadableStream !== 'undefined'
     });
 
     if (!openaiApiKey) {
@@ -71,34 +72,39 @@ export async function POST(request: Request) {
       streaming: stream
     });
 
-    // For streaming responses
-    if (stream) {
+    // For streaming responses - check if ReadableStream is available
+    if (stream && typeof ReadableStream !== 'undefined') {
       const encoder = new TextEncoder();
-      const decoder = new TextDecoder();
       
       // Create a stream
       const stream = new ReadableStream({
         async start(controller) {
-          // Create OpenAI streaming completion
-          const completion = await openai.chat.completions.create({
-            model: modelName,
-            messages,
-            temperature: isNotesGeneration ? 0.5 : 0.7,
-            max_tokens: isNotesGeneration ? 2500 : 1000,
-            stream: true,
-          });
+          try {
+            // Create OpenAI streaming completion
+            const completion = await openai.chat.completions.create({
+              model: modelName,
+              messages,
+              temperature: isNotesGeneration ? 0.5 : 0.7,
+              max_tokens: isNotesGeneration ? 2500 : 1000,
+              stream: true,
+            });
 
-          // Handle each chunk from the API
-          for await (const chunk of completion) {
-            const content = chunk.choices[0]?.delta?.content || '';
-            if (content) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+            // Handle each chunk from the API
+            for await (const chunk of completion) {
+              const content = chunk.choices[0]?.delta?.content || '';
+              if (content) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+              }
             }
-          }
 
-          // End the stream
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
+            // End the stream
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          } catch (error) {
+            console.error('Error in stream processing:', error);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Stream processing error' })}\n\n`));
+            controller.close();
+          }
         },
       });
 
@@ -111,27 +117,29 @@ export async function POST(request: Request) {
           ...corsHeaders(),
         },
       });
+    } else {
+      // For non-streaming responses or when ReadableStream is not available
+      console.log(stream ? 'ReadableStream not available, falling back to non-streaming response' : 'Using non-streaming response');
+      
+      const response = await openai.chat.completions.create({
+        model: modelName,
+        messages,
+        temperature: isNotesGeneration ? 0.5 : 0.7, // Lower temperature for more structured output on notes
+        max_tokens: isNotesGeneration ? 2500 : 1000, // Allow more tokens for detailed notes
+      });
+
+      console.log('OpenAI response received:', {
+        responseLength: response.choices[0].message.content?.length || 0,
+        model: response.model,
+        promptTokens: response.usage?.prompt_tokens,
+        completionTokens: response.usage?.completion_tokens
+      });
+
+      // Return response with CORS headers
+      return NextResponse.json({
+        message: response.choices[0].message.content,
+      }, { headers: corsHeaders() });
     }
-    
-    // For non-streaming responses (legacy support)
-    const response = await openai.chat.completions.create({
-      model: modelName,
-      messages,
-      temperature: isNotesGeneration ? 0.5 : 0.7, // Lower temperature for more structured output on notes
-      max_tokens: isNotesGeneration ? 2500 : 1000, // Allow more tokens for detailed notes
-    });
-
-    console.log('OpenAI response received:', {
-      responseLength: response.choices[0].message.content?.length || 0,
-      model: response.model,
-      promptTokens: response.usage?.prompt_tokens,
-      completionTokens: response.usage?.completion_tokens
-    });
-
-    // Return response with CORS headers
-    return NextResponse.json({
-      message: response.choices[0].message.content,
-    }, { headers: corsHeaders() });
   } catch (error: any) {
     console.error('Error generating AI response:', error);
     

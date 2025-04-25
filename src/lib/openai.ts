@@ -180,9 +180,11 @@ export async function generateStreamingAIResponse(
         typeof m.content === 'string' && 
         m.content.includes('Generate comprehensive study notes')
       ),
-      model: process.env.OPENAI_MODEL_NAME || 'gpt-4o'
+      model: process.env.OPENAI_MODEL_NAME || 'gpt-4o',
+      streamingSupported: typeof ReadableStream !== 'undefined'
     });
     
+    // Make the request with stream: true parameter
     const response = await fetch('/api/ai', {
       method: 'POST',
       headers: {
@@ -207,52 +209,101 @@ export async function generateStreamingAIResponse(
       throw new Error(`Error ${response.status}: ${errorMessage}`);
     }
     
-    if (!response.body) {
-      throw new Error('Response body is null');
-    }
+    // Different handling based on response type
+    // If Content-Type is text/event-stream, use streaming, otherwise use regular JSON
+    const contentType = response.headers.get('Content-Type') || '';
     
-    // Handle the streaming response
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let fullText = '';
-    
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        // Decode the chunk and process it
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n').filter(line => line.trim() !== '');
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.substring(6);
-            
-            // Check if the stream is done
-            if (data === '[DONE]') {
-              onComplete(fullText);
-              break;
-            }
-            
-            try {
-              const parsedData = JSON.parse(data);
-              if (parsedData.content) {
-                fullText += parsedData.content;
-                onChunk(parsedData.content);
+    if (contentType.includes('text/event-stream') && response.body) {
+      // Handle the streaming response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let fullText = '';
+      
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          // Decode the chunk and process it
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.substring(6);
+              
+              // Check if the stream is done
+              if (data === '[DONE]') {
+                onComplete(fullText);
+                break;
               }
-            } catch (e) {
-              console.error('Error parsing JSON from stream:', e);
-              console.error('Raw data:', data);
+              
+              try {
+                const parsedData = JSON.parse(data);
+                if (parsedData.content) {
+                  fullText += parsedData.content;
+                  onChunk(parsedData.content);
+                } else if (parsedData.error) {
+                  console.error('Error in stream data:', parsedData.error);
+                  throw new Error(parsedData.error);
+                }
+              } catch (e) {
+                console.error('Error parsing JSON from stream:', e);
+                console.error('Raw data:', data);
+              }
             }
           }
         }
+      } catch (error) {
+        console.error('Error reading stream:', error);
+        throw error;
+      } finally {
+        reader.releaseLock();
       }
-    } catch (error) {
-      console.error('Error reading stream:', error);
-      throw error;
-    } finally {
-      reader.releaseLock();
+    } else {
+      // Fallback - server returned regular JSON instead of a stream
+      console.log('Server did not return a stream. Using fallback JSON response handling.');
+      const responseText = await response.text();
+      
+      try {
+        const data = JSON.parse(responseText);
+        if (data.message) {
+          // Simulate streaming with the complete message
+          // Break it into smaller chunks for a typing effect
+          const fullResponse = data.message;
+          
+          // Helper function to add artificial delay
+          const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+          
+          // Split response into words
+          const words = fullResponse.split(' ');
+          let currentText = '';
+          
+          // Process each word with a small delay
+          for (let i = 0; i < words.length; i++) {
+            // Add the next word
+            currentText += (i === 0 ? '' : ' ') + words[i];
+            
+            // If at word boundary or reached end, send chunk
+            if (i % 3 === 2 || i === words.length - 1) {
+              const chunk = i === 0 ? words[0] : ' ' + words.slice(Math.max(0, i-2), i+1).join(' ');
+              onChunk(chunk);
+              
+              // Short delay between chunks
+              await delay(50);
+            }
+          }
+          
+          // Complete the response
+          onComplete(fullResponse);
+        } else {
+          throw new Error('Response did not contain a message');
+        }
+      } catch (parseError) {
+        console.error('Error parsing response JSON:', parseError);
+        console.error('Raw response:', responseText.substring(0, 200) + '...');
+        throw new Error('Invalid response format from server');
+      }
     }
   } catch (error) {
     console.error('Error generating streaming response:', error);
