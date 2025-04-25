@@ -114,12 +114,14 @@ export async function POST(request: Request) {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no', // Prevent buffering for AWS infrastructure
           ...corsHeaders(),
         },
       });
     } else {
       // For non-streaming responses or when ReadableStream is not available
-      console.log(stream ? 'ReadableStream not available, falling back to non-streaming response' : 'Using non-streaming response');
+      const reasonMsg = stream ? 'ReadableStream not available' : 'Streaming not requested';
+      console.log(`${reasonMsg}, falling back to non-streaming response`);
       
       const response = await openai.chat.completions.create({
         model: modelName,

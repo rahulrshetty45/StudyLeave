@@ -134,15 +134,6 @@ export async function generateStreamingAIResponse(
   onComplete: (fullText: string) => void
 ): Promise<void> {
   try {
-    // Log environment info for debugging purposes
-    console.log('Streaming environment check:', {
-      isProduction: process.env.NODE_ENV === 'production',
-      hasReadableStream: typeof ReadableStream !== 'undefined',
-      hasTextEncoder: typeof TextEncoder !== 'undefined',
-      hasTextDecoder: typeof TextDecoder !== 'undefined',
-      userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'SSR',
-    });
-    
     // IMPLEMENT GLOBAL THROTTLE - no more than one request every 1 second
     const now = Date.now();
     const timeSinceLastRequest = now - globalLastRequestTime;
@@ -202,15 +193,6 @@ export async function generateStreamingAIResponse(
       body: JSON.stringify({ messages, stream: true }),
     });
     
-    // Log response details
-    console.log('Streaming response headers:', {
-      status: response.status,
-      statusText: response.statusText,
-      contentType: response.headers.get('Content-Type'),
-      hasBody: !!response.body,
-      isReadableStream: response.body instanceof ReadableStream
-    });
-    
     // Check for errors
     if (!response.ok) {
       const errorText = await response.text();
@@ -233,25 +215,17 @@ export async function generateStreamingAIResponse(
     
     if (contentType.includes('text/event-stream') && response.body) {
       // Handle the streaming response
-      console.log('Processing streaming response with event-stream content type');
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let fullText = '';
-      let chunkCount = 0;
       
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) {
-            console.log(`Streaming completed after ${chunkCount} chunks`);
-            break;
-          }
+          if (done) break;
           
           // Decode the chunk and process it
           const chunk = decoder.decode(value);
-          chunkCount++;
-          console.log(`Received chunk #${chunkCount}, size: ${chunk.length} bytes`);
-          
           const lines = chunk.split('\n').filter(line => line.trim() !== '');
           
           for (const line of lines) {
@@ -260,7 +234,6 @@ export async function generateStreamingAIResponse(
               
               // Check if the stream is done
               if (data === '[DONE]') {
-                console.log('Received [DONE] marker in stream');
                 onComplete(fullText);
                 break;
               }
@@ -270,7 +243,6 @@ export async function generateStreamingAIResponse(
                 if (parsedData.content) {
                   fullText += parsedData.content;
                   onChunk(parsedData.content);
-                  console.log(`Processed content chunk: "${parsedData.content.substring(0, 20)}${parsedData.content.length > 20 ? '...' : ''}"`);
                 } else if (parsedData.error) {
                   console.error('Error in stream data:', parsedData.error);
                   throw new Error(parsedData.error);
@@ -290,52 +262,56 @@ export async function generateStreamingAIResponse(
       }
     } else {
       // Fallback - server returned regular JSON instead of a stream
-      console.log('Server did not return a stream. Using fallback JSON response handling with content type:', contentType);
+      console.log('Server did not return a stream. Using fallback JSON response handling.');
+      console.log('Content-Type received:', contentType);
       const responseText = await response.text();
-      console.log(`Received non-streaming response, length: ${responseText.length} bytes`);
       
       try {
-        const data = JSON.parse(responseText);
-        if (data.message) {
-          console.log('Successfully parsed JSON response with message property');
-          // Simulate streaming with the complete message
-          // Break it into smaller chunks for a typing effect
-          const fullResponse = data.message;
-          
-          // Helper function to add artificial delay
-          const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-          
-          // Split response into words
-          const words = fullResponse.split(' ');
-          let currentText = '';
-          console.log(`Simulating streaming with ${words.length} words`);
-          
-          // Process each word with a small delay
-          for (let i = 0; i < words.length; i++) {
-            // Add the next word
-            currentText += (i === 0 ? '' : ' ') + words[i];
-            
-            // If at word boundary or reached end, send chunk
-            if (i % 3 === 2 || i === words.length - 1) {
-              const chunk = i === 0 ? words[0] : ' ' + words.slice(Math.max(0, i-2), i+1).join(' ');
-              onChunk(chunk);
-              
-              // Short delay between chunks
-              await delay(50);
-            }
+        // First try to parse as JSON
+        let fullResponse = '';
+        try {
+          const data = JSON.parse(responseText);
+          if (data.message) {
+            fullResponse = data.message;
+          } else {
+            console.warn('JSON response missing message field:', data);
+            fullResponse = responseText; // Fallback to raw text
           }
-          
-          // Complete the response
-          console.log('Completed simulated streaming');
-          onComplete(fullResponse);
-        } else {
-          console.error('Response missing message property:', data);
-          throw new Error('Response did not contain a message');
+        } catch (parseError) {
+          // If not valid JSON, use the raw text as the response
+          console.log('Response is not JSON, using as plain text');
+          fullResponse = responseText;
         }
-      } catch (parseError) {
-        console.error('Error parsing response JSON:', parseError);
+        
+        // Simulate streaming with the complete message
+        // Break it into smaller chunks for a typing effect
+        const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        
+        // Split response into words
+        const words = fullResponse.split(' ');
+        let currentText = '';
+        
+        // Process each word with a small delay
+        for (let i = 0; i < words.length; i++) {
+          // Add the next word
+          currentText += (i === 0 ? '' : ' ') + words[i];
+          
+          // If at word boundary or reached end, send chunk
+          if (i % 3 === 2 || i === words.length - 1) {
+            const chunk = i === 0 ? words[0] : ' ' + words.slice(Math.max(0, i-2), i+1).join(' ');
+            onChunk(chunk);
+            
+            // Short delay between chunks
+            await delay(50);
+          }
+        }
+        
+        // Complete the response
+        onComplete(fullResponse);
+      } catch (error) {
+        console.error('Error processing response:', error);
         console.error('Raw response:', responseText.substring(0, 200) + '...');
-        throw new Error('Invalid response format from server');
+        throw new Error('Failed to process server response');
       }
     }
   } catch (error) {
