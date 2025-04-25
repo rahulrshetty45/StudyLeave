@@ -34,6 +34,15 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
+    // Extended environment debugging
+    console.log('API route environment:', {
+      runtime: typeof process !== 'undefined' ? process.env.NEXT_RUNTIME || 'unknown' : 'unknown',
+      node_env: process.env.NODE_ENV,
+      vercel_env: process.env.VERCEL_ENV || 'not-vercel',
+      next_version: process.env.NEXT_VERSION || 'unknown',
+      region: process.env.VERCEL_REGION || 'unknown',
+    });
+    
     // Get messages from request body
     const { messages, stream = false } = await request.json();
 
@@ -42,7 +51,9 @@ export async function POST(request: Request) {
       modelNameExists: !!modelName,
       apiKeyExists: !!openaiApiKey,
       nodeEnv: process.env.NODE_ENV,
-      hasReadableStream: typeof ReadableStream !== 'undefined'
+      hasReadableStream: typeof ReadableStream !== 'undefined',
+      hasTextEncoder: typeof TextEncoder !== 'undefined',
+      attemptStreaming: stream
     });
 
     if (!openaiApiKey) {
@@ -73,73 +84,110 @@ export async function POST(request: Request) {
     });
 
     // For streaming responses - check if ReadableStream is available
-    if (stream && typeof ReadableStream !== 'undefined') {
-      const encoder = new TextEncoder();
-      
-      // Create a stream
-      const stream = new ReadableStream({
-        async start(controller) {
-          try {
-            // Create OpenAI streaming completion
-            const completion = await openai.chat.completions.create({
-              model: modelName,
-              messages,
-              temperature: isNotesGeneration ? 0.5 : 0.7,
-              max_tokens: isNotesGeneration ? 2500 : 1000,
-              stream: true,
-            });
+    if (stream && typeof ReadableStream !== 'undefined' && typeof TextEncoder !== 'undefined') {
+      try {
+        console.log('Attempting to create streaming response');
+        const encoder = new TextEncoder();
+        
+        // Create a stream
+        const stream = new ReadableStream({
+          async start(controller) {
+            try {
+              console.log('Stream controller started, creating OpenAI completion');
+              // Create OpenAI streaming completion
+              const completion = await openai.chat.completions.create({
+                model: modelName,
+                messages,
+                temperature: isNotesGeneration ? 0.5 : 0.7,
+                max_tokens: isNotesGeneration ? 2500 : 1000,
+                stream: true,
+              });
 
-            // Handle each chunk from the API
-            for await (const chunk of completion) {
-              const content = chunk.choices[0]?.delta?.content || '';
-              if (content) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+              console.log('OpenAI streaming completion created successfully');
+              let chunkCount = 0;
+              
+              // Handle each chunk from the API
+              for await (const chunk of completion) {
+                chunkCount++;
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                  const encoded = encoder.encode(`data: ${JSON.stringify({ content })}\n\n`);
+                  controller.enqueue(encoded);
+                  if (chunkCount % 10 === 0) {
+                    console.log(`Streamed ${chunkCount} chunks so far`);
+                  }
+                }
               }
+
+              // End the stream
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              console.log(`Streaming completed, sent ${chunkCount} total chunks`);
+              controller.close();
+            } catch (error) {
+              console.error('Error in stream processing:', error);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Stream processing error' })}\n\n`));
+              controller.close();
             }
+          },
+        });
 
-            // End the stream
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-            controller.close();
-          } catch (error) {
-            console.error('Error in stream processing:', error);
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Stream processing error' })}\n\n`));
-            controller.close();
-          }
-        },
-      });
-
-      // Return the stream response
-      return new Response(stream, {
-        headers: {
+        console.log('Returning streaming response with proper headers');
+        
+        // Return the stream response with explicit content type
+        const responseHeaders = {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'no-cache, no-transform',
           'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',  // Disable Nginx buffering
           ...corsHeaders(),
-        },
-      });
+        };
+        
+        console.log('Response headers:', responseHeaders);
+        
+        return new Response(stream, {
+          headers: responseHeaders
+        });
+      } catch (streamError) {
+        console.error('Critical streaming error:', streamError);
+        // If streaming fails at any point, fall back to regular response
+        console.log('Falling back to regular response due to streaming error');
+      }
     } else {
       // For non-streaming responses or when ReadableStream is not available
-      console.log(stream ? 'ReadableStream not available, falling back to non-streaming response' : 'Using non-streaming response');
+      const reasonMsg = !stream 
+        ? 'Client requested non-streaming response'
+        : !typeof ReadableStream !== 'undefined'
+          ? 'ReadableStream not available'
+          : 'TextEncoder not available';
       
-      const response = await openai.chat.completions.create({
-        model: modelName,
-        messages,
-        temperature: isNotesGeneration ? 0.5 : 0.7, // Lower temperature for more structured output on notes
-        max_tokens: isNotesGeneration ? 2500 : 1000, // Allow more tokens for detailed notes
-      });
-
-      console.log('OpenAI response received:', {
-        responseLength: response.choices[0].message.content?.length || 0,
-        model: response.model,
-        promptTokens: response.usage?.prompt_tokens,
-        completionTokens: response.usage?.completion_tokens
-      });
-
-      // Return response with CORS headers
-      return NextResponse.json({
-        message: response.choices[0].message.content,
-      }, { headers: corsHeaders() });
+      console.log(`Using non-streaming response: ${reasonMsg}`);
     }
+    
+    // If we got here, use non-streaming response (either by choice or fallback)
+    console.log('Generating non-streaming response from OpenAI');
+    const response = await openai.chat.completions.create({
+      model: modelName,
+      messages,
+      temperature: isNotesGeneration ? 0.5 : 0.7, // Lower temperature for more structured output on notes
+      max_tokens: isNotesGeneration ? 2500 : 1000, // Allow more tokens for detailed notes
+    });
+
+    console.log('OpenAI response received:', {
+      responseLength: response.choices[0].message.content?.length || 0,
+      model: response.model,
+      promptTokens: response.usage?.prompt_tokens,
+      completionTokens: response.usage?.completion_tokens
+    });
+
+    // Return response with CORS headers and explicit content type
+    return NextResponse.json({
+      message: response.choices[0].message.content,
+    }, { 
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders() 
+      }
+    });
   } catch (error: any) {
     console.error('Error generating AI response:', error);
     

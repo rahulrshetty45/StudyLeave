@@ -921,7 +921,7 @@ export default function NotePage() {
             </div>
           )}
           <div className="content-viewer">
-            {parse(block.content)}
+            {parse(DOMPurify.sanitize(block.content))}
           </div>
           {/* Add a small button at the bottom to clearly show you can add content */}
           <div 
@@ -1332,6 +1332,15 @@ export default function NotePage() {
       setIsGenerating(true);
       setShowNotesDialog(false);
       
+      // Debug info
+      setDebugInfo(`Streaming environment: ${process.env.NODE_ENV || 'unknown'}`);
+      console.log('Note page streaming environment:', {
+        env: process.env.NODE_ENV,
+        hasReadableStream: typeof ReadableStream !== 'undefined',
+        hasTextDecoder: typeof TextDecoder !== 'undefined',
+        hasTextEncoder: typeof TextEncoder !== 'undefined',
+      });
+      
       // Format subject and note names for the prompt
       const formattedSubjectName = subject.split('-').map(word => 
         word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -1374,7 +1383,7 @@ The notes will be saved in a note-taking application, so make them well-organize
       const typingBlock: Block = {
         id: typingBlockId,
         type: 'paragraph',
-        content: ''
+        content: '<div class="loading-typing">Generating notes<span>.</span><span>.</span><span>.</span></div><style>.loading-typing span { animation: loadingDots 1.4s infinite; opacity: 0; } .loading-typing span:nth-child(1) { animation-delay: 0s; } .loading-typing span:nth-child(2) { animation-delay: 0.2s; } .loading-typing span:nth-child(3) { animation-delay: 0.4s; } @keyframes loadingDots { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }</style>'
       };
       
       // Add the divider and typing indicator to existing blocks
@@ -1388,9 +1397,23 @@ The notes will be saved in a note-taking application, so make them well-organize
       let fullResponse = '';
       let currentLine = '';
       let lineBuffer: string[] = [];
+      let streamingStartTime = Date.now();
+      let lastChunkTime = streamingStartTime;
+      let receivedChunks = false;
       
       // Process each incoming chunk
       const processChunk = (chunk: string) => {
+        // Mark that we've received at least one chunk successfully
+        receivedChunks = true;
+        const now = Date.now();
+        console.log(`Chunk received after ${now - lastChunkTime}ms since last chunk, ${now - streamingStartTime}ms total`);
+        lastChunkTime = now;
+        
+        // Update debug info occasionally
+        if (Math.random() < 0.1) {
+          setDebugInfo(`Streaming: ${Math.floor((now - streamingStartTime) / 1000)}s, ${fullResponse.length} chars`);
+        }
+        
         // Add chunk to the full response
         fullResponse += chunk;
         
@@ -1520,6 +1543,9 @@ The notes will be saved in a note-taking application, so make them well-organize
       
       // Handle completion of the response
       const handleComplete = (fullText: string) => {
+        console.log('Streaming complete, formatting final content');
+        setDebugInfo('Streaming complete, formatting content');
+        
         // Split the response into paragraphs
         const contentLines = fullText.split('\n');
         
@@ -1579,22 +1605,120 @@ The notes will be saved in a note-taking application, so make them well-organize
         
         // Finish generating
         setIsGenerating(false);
+        setDebugInfo('Content generation complete');
       };
       
-      // Use the streaming API
-      await generateStreamingAIResponse(
-        [systemMessage, userMessage],
-        processChunk,
-        handleComplete
-      );
+      // Setup a timeout to check if we're receiving streaming chunks
+      const streamingTimeoutCheck = setTimeout(() => {
+        if (!receivedChunks) {
+          console.log('No streaming chunks received after 5 seconds, falling back to non-streaming request');
+          setDebugInfo('Streaming failed, using fallback');
+          
+          // If no chunks received after 5 seconds, try a non-streaming request instead
+          // Cancel the previous request and make a new one
+          generateAIResponse([systemMessage, userMessage])
+            .then(response => {
+              console.log('Fallback non-streaming response received');
+              
+              // Simulate streaming with the complete message for a better experience
+              // Break it into smaller chunks for a typing effect
+              const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+              
+              // Process the response in small chunks
+              const simulateStreaming = async () => {
+                const words = response.split(' ');
+                for (let i = 0; i < words.length; i += 3) {
+                  const chunk = words.slice(i, i + 3).join(' ') + ' ';
+                  processChunk(chunk);
+                  await delay(50);
+                }
+                handleComplete(response);
+              };
+              
+              simulateStreaming();
+            })
+            .catch(error => {
+              console.error('Error in fallback request:', error);
+              setDebugInfo('Both streaming and fallback failed');
+              
+              // Even the fallback failed, update the typing block with an error message
+              setBlocks(prevBlocks => {
+                const updatedBlocks = [...prevBlocks];
+                const typingIndex = updatedBlocks.findIndex(block => block.id === typingBlockId);
+                
+                if (typingIndex !== -1) {
+                  updatedBlocks[typingIndex] = {
+                    ...updatedBlocks[typingIndex],
+                    content: '<p style="color: red;">Failed to generate content. Please try again.</p>'
+                  };
+                }
+                
+                return updatedBlocks;
+              });
+              
+              setIsGenerating(false);
+            });
+        }
+      }, 5000);
       
+      // Use the streaming API
+      try {
+        await generateStreamingAIResponse(
+          [systemMessage, userMessage],
+          processChunk,
+          handleComplete
+        );
+        
+        // Clear the timeout if streaming worked
+        clearTimeout(streamingTimeoutCheck);
+      } catch (streamingError) {
+        console.error('Error using streaming API:', streamingError);
+        
+        // If streaming API throws an error, make sure the timeout is cleared
+        clearTimeout(streamingTimeoutCheck);
+        
+        // If streaming failed but we haven't already started the fallback,
+        // and we haven't received any chunks yet, try the non-streaming approach
+        if (!receivedChunks) {
+          setDebugInfo('Streaming error, using fallback');
+          
+          generateAIResponse([systemMessage, userMessage])
+            .then(response => {
+              console.log('Error fallback response received');
+              handleComplete(response);
+            })
+            .catch(fallbackError => {
+              console.error('Error in fallback after streaming error:', fallbackError);
+              
+              // Both methods failed, update the typing block with an error message
+              setBlocks(prevBlocks => {
+                const updatedBlocks = [...prevBlocks];
+                const typingIndex = updatedBlocks.findIndex(block => block.id === typingBlockId);
+                
+                if (typingIndex !== -1) {
+                  updatedBlocks[typingIndex] = {
+                    ...updatedBlocks[typingIndex],
+                    content: '<p style="color: red;">Failed to generate content. Please try again.</p>'
+                  };
+                }
+                
+                return updatedBlocks;
+              });
+              
+              setIsGenerating(false);
+            });
+        }
+      }
     } catch (error) {
       console.error('Error generating AI content:', error);
+      setDebugInfo('Content generation error');
+      
       // Remove the typing indicator block on error
       setBlocks(prevBlocks => {
         const withoutTyping = prevBlocks.filter(block => block.id !== typingBlockId);
         return withoutTyping;
       });
+      
       setIsGenerating(false);
     }
   };
@@ -2908,7 +3032,7 @@ Your explanation will be inserted directly into the user's notes.`
                     </div>
                   )}
                   <div className="content-viewer">
-                    {parse(block.content)}
+                    {parse(DOMPurify.sanitize(block.content))}
                   </div>
                   {/* Add a small button at the bottom to clearly show you can add content */}
                   <div 
