@@ -76,7 +76,7 @@ export async function POST(request: Request) {
     if (stream && typeof ReadableStream !== 'undefined') {
       const encoder = new TextEncoder();
       
-      // Create a stream
+      // Create a stream with AWS Amplify compatible setup
       const stream = new ReadableStream({
         async start(controller) {
           try {
@@ -93,7 +93,11 @@ export async function POST(request: Request) {
             for await (const chunk of completion) {
               const content = chunk.choices[0]?.delta?.content || '';
               if (content) {
+                // Format for AWS Amplify compatibility
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+                
+                // Force flush by adding a small delay - helps with AWS infrastructure
+                await new Promise(resolve => setTimeout(resolve, 5));
               }
             }
 
@@ -108,13 +112,14 @@ export async function POST(request: Request) {
         },
       });
 
-      // Return the stream response
+      // Return the stream response with AWS compatible headers
       return new Response(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'no-cache, no-transform',
           'Connection': 'keep-alive',
-          'X-Accel-Buffering': 'no', // Prevent buffering for AWS infrastructure
+          'X-Accel-Buffering': 'no',
+          'Transfer-Encoding': 'chunked',
           ...corsHeaders(),
         },
       });

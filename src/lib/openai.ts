@@ -181,7 +181,8 @@ export async function generateStreamingAIResponse(
         m.content.includes('Generate comprehensive study notes')
       ),
       model: process.env.OPENAI_MODEL_NAME || 'gpt-4o',
-      streamingSupported: typeof ReadableStream !== 'undefined'
+      streamingSupported: typeof ReadableStream !== 'undefined',
+      isAWSAmplify: typeof window !== 'undefined' && window.location.hostname.includes('amplifyapp.com')
     });
     
     // Make the request with stream: true parameter
@@ -212,51 +213,81 @@ export async function generateStreamingAIResponse(
     // Different handling based on response type
     // If Content-Type is text/event-stream, use streaming, otherwise use regular JSON
     const contentType = response.headers.get('Content-Type') || '';
+    console.log('Response content type:', contentType);
+    console.log('Has body?', !!response.body);
     
     if (contentType.includes('text/event-stream') && response.body) {
       // Handle the streaming response
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let fullText = '';
+      let buffer = '';
       
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            // Process any remaining data in the buffer
+            if (buffer.trim()) {
+              processEventStreamChunk(buffer);
+            }
+            break;
+          }
           
-          // Decode the chunk and process it
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+          // Decode the chunk and add to buffer
+          const text = decoder.decode(value, { stream: true });
+          buffer += text;
           
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.substring(6);
-              
-              // Check if the stream is done
-              if (data === '[DONE]') {
-                onComplete(fullText);
-                break;
-              }
-              
-              try {
-                const parsedData = JSON.parse(data);
-                if (parsedData.content) {
-                  fullText += parsedData.content;
-                  onChunk(parsedData.content);
-                } else if (parsedData.error) {
-                  console.error('Error in stream data:', parsedData.error);
-                  throw new Error(parsedData.error);
+          // Process complete events in the buffer
+          const processEventStreamChunk = (chunk: string) => {
+            const lines = chunk.split('\n');
+            
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i].trim();
+              if (line.startsWith('data: ')) {
+                const data = line.substring(6);
+                
+                // Check if the stream is done
+                if (data === '[DONE]') {
+                  onComplete(fullText);
+                  return;
                 }
-              } catch (e) {
-                console.error('Error parsing JSON from stream:', e);
-                console.error('Raw data:', data);
+                
+                try {
+                  const parsedData = JSON.parse(data);
+                  if (parsedData.content) {
+                    fullText += parsedData.content;
+                    onChunk(parsedData.content);
+                  } else if (parsedData.error) {
+                    console.error('Error in stream data:', parsedData.error);
+                    throw new Error(parsedData.error);
+                  }
+                } catch (e) {
+                  console.error('Error parsing JSON from stream:', e, 'Data:', data);
+                }
               }
             }
+          };
+          
+          // Find complete events (separated by double newlines)
+          let eventEnd = buffer.indexOf('\n\n');
+          while (eventEnd !== -1) {
+            const eventData = buffer.substring(0, eventEnd);
+            processEventStreamChunk(eventData);
+            buffer = buffer.substring(eventEnd + 2);
+            eventEnd = buffer.indexOf('\n\n');
           }
         }
       } catch (error) {
         console.error('Error reading stream:', error);
-        throw error;
+        
+        // If we already have some text, use it for graceful fallback
+        if (fullText) {
+          console.log('Stream read error, but using partial results');
+          onComplete(fullText);
+        } else {
+          throw error;
+        }
       } finally {
         reader.releaseLock();
       }
@@ -264,6 +295,7 @@ export async function generateStreamingAIResponse(
       // Fallback - server returned regular JSON instead of a stream
       console.log('Server did not return a stream. Using fallback JSON response handling.');
       console.log('Content-Type received:', contentType);
+      console.log('Response headers:', [...response.headers.entries()].map(([key, value]) => `${key}: ${value}`).join(', '));
       const responseText = await response.text();
       
       try {
