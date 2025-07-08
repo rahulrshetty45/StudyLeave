@@ -1,15 +1,9 @@
-// Client-side API service for OpenAI calls
-// Instead of directly calling the OpenAI API from the client, we make a request to our API route
-
-// Import needed for timestamp tracking
 import { setTimeout } from 'timers';
 
-// Add a request tracker to prevent duplicate API calls
 const recentRequests = new Map<string, number>();
-const DUPLICATE_WINDOW_MS = 2000; // 2 seconds window to prevent duplicates
-const THROTTLE_WINDOW_MS = 5000; // 5 seconds global throttle window
+const DUPLICATE_WINDOW_MS = 2000;
+const THROTTLE_WINDOW_MS = 5000;
 
-// Add a global throttle for ALL requests
 let globalLastRequestTime = 0;
 
 export interface Message {
@@ -19,7 +13,6 @@ export interface Message {
 
 export async function generateAIResponse(messages: Message[]): Promise<string> {
   try {
-    // IMPLEMENT GLOBAL THROTTLE - no more than one request every 1 second
     const now = Date.now();
     const timeSinceLastRequest = now - globalLastRequestTime;
     
@@ -28,16 +21,13 @@ export async function generateAIResponse(messages: Message[]): Promise<string> {
       return "I'm processing your request. Please wait a moment before asking again.";
     }
     
-    // Update last request time
     globalLastRequestTime = now;
     
-    // Create a simple hash of the messages to track duplicates
     const requestKey = JSON.stringify(messages.map(m => ({
       role: m.role,
-      content: typeof m.content === 'string' ? m.content.substring(0, 100) : '' // First 100 chars is enough for comparison
+      content: typeof m.content === 'string' ? m.content.substring(0, 100) : ''
     })));
     
-    // Check if this is a duplicate request
     const previousRequestTime = recentRequests.get(requestKey);
     
     if (previousRequestTime && (now - previousRequestTime < DUPLICATE_WINDOW_MS)) {
@@ -45,15 +35,11 @@ export async function generateAIResponse(messages: Message[]): Promise<string> {
       return "I'm already processing a similar request. Please wait a moment.";
     }
     
-    // Record this request
     recentRequests.set(requestKey, now);
     
-    // Clean up old requests after a while
     setTimeout(() => {
       recentRequests.delete(requestKey);
     }, DUPLICATE_WINDOW_MS * 2);
-    
-    // Continue with normal API call
     console.log('Sending request to /api/ai with', {
       messageCount: messages.length,
       isNotesGeneration: messages.some(m => 
@@ -72,7 +58,6 @@ export async function generateAIResponse(messages: Message[]): Promise<string> {
       body: JSON.stringify({ messages }),
     });
 
-    // Log response status
     console.log('API response status:', response.status);
 
     if (!response.ok) {
@@ -81,14 +66,12 @@ export async function generateAIResponse(messages: Message[]): Promise<string> {
       let errorDetails = {};
       
       try {
-        // Try to parse the error as JSON
         const errorData = JSON.parse(errorText);
         errorMessage = errorData.error || errorMessage;
         errorDetails = errorData;
         
         console.error('API error details:', errorDetails);
       } catch (parseError) {
-        // If parsing fails, use the raw text
         console.error('API error (raw):', errorText);
       }
       
@@ -111,23 +94,19 @@ export async function generateAIResponse(messages: Message[]): Promise<string> {
   } catch (error) {
     console.error('Error generating response:', error);
     
-    // Extract and log network error details
     if (error instanceof Error) {
       console.error('Error name:', error.name);
       console.error('Error message:', error.message);
       console.error('Error stack:', error.stack);
     }
     
-    // Return a more specific error message if possible
     if (error instanceof TypeError && error.message.includes('fetch')) {
       return "Connection error: Unable to reach the AI service. Please check your internet connection and try again.";
     }
     
     return "I'm sorry, I encountered an error processing your request. Technical details: " + (error instanceof Error ? error.message : String(error));
   }
-} 
-
-// New function for streaming responses
+}
 export async function generateStreamingAIResponse(
   messages: Message[],
   onChunk: (chunk: string) => void,

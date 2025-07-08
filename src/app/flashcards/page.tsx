@@ -16,7 +16,6 @@ interface FlashcardProps {
   card: Flashcard;
 }
 
-// Create a dedicated FlashcardComponent
 const FlashcardComponent = ({ card }: FlashcardProps) => {
   const [isHovered, setIsHovered] = useState(false);
   
@@ -59,41 +58,8 @@ const FlashcardComponent = ({ card }: FlashcardProps) => {
   );
 };
 
-// Alternative pure CSS implementation (uncomment to use)
-// const PureCSSFlashcardComponent = ({ card }: FlashcardProps) => {
-//   return (
-//     <div className="h-64 flashcard-hover hover-shadow-effect cursor-pointer">
-//       <div className="flashcard-container">
-//         {/* Front */}
-//         <div className="flashcard-front border border-[var(--border-color)] p-6 bg-white dark:bg-[var(--bg-tertiary)]">
-//           <div className="text-xs text-gray-500 dark:text-gray-400 mb-4">{card.category}</div>
-//           <div className="text-lg font-medium flex-1 flex items-center justify-center text-center">
-//             {card.front}
-//           </div>
-//           <div className="text-sm text-gray-500 dark:text-gray-400 mt-4 text-center">
-//             Hover to reveal answer
-//           </div>
-//         </div>
-//         
-//         {/* Back */}
-//         <div className="flashcard-back border border-[var(--border-color)] p-6 bg-blue-50 dark:bg-blue-900/20">
-//           <div className="text-xs text-gray-500 dark:text-gray-400 mb-4">{card.category}</div>
-//           <div className="text-lg flex-1 flex items-center justify-center text-center font-medium">
-//             {card.back}
-//           </div>
-//           <div className="text-sm text-gray-500 dark:text-gray-400 mt-4 text-center">
-//             Return to question
-//           </div>
-//         </div>
-//       </div>
-//     </div>
-//   );
-// };
-
 export default function FlashcardsPage() {
   const [currentCategory, setCurrentCategory] = useState<string>("All");
-  
-  // Example flashcard data
   const flashcards: Flashcard[] = [
     {
       id: "1",
@@ -133,10 +99,8 @@ export default function FlashcardsPage() {
     }
   ];
 
-  // Get unique categories
   const categories = ["All", ...new Set(flashcards.map(card => card.category))];
 
-  // Filter flashcards by category
   const filteredFlashcards = currentCategory === "All"
     ? flashcards
     : flashcards.filter(card => card.category === currentCategory);

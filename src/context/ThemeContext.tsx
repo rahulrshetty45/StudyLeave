@@ -12,11 +12,9 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Initialize theme from localStorage if available, otherwise use system preference
   const [theme, setTheme] = useState<Theme>('light');
   
   useEffect(() => {
-    // Check for saved theme preference or use system preference
     const savedTheme = localStorage.getItem('theme') as Theme;
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     
@@ -27,7 +25,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
   
-  // Apply theme to document when theme changes
   useEffect(() => {
     const root = document.documentElement;
     root.setAttribute('data-theme', theme);
@@ -45,7 +42,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Custom hook to use the theme context
 export function useTheme() {
   const context = useContext(ThemeContext);
   if (context === undefined) {

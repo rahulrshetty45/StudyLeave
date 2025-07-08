@@ -8,7 +8,6 @@ import UpcomingTests from '../components/dashboard/UpcomingTests';
 import { RefreshCw } from 'lucide-react';
 import AppLayout from '../components/layout/AppLayout';
 
-// Define the types needed for the components
 type StatType = 'subjects' | 'score' | 'time' | 'notes';
 type ColorType = 'blue' | 'green' | 'purple' | 'orange';
 
@@ -35,7 +34,6 @@ interface SubjectProgress {
   estimatedCompletion: string;
 }
 
-// Define the subject and subtopic structures (matching Sidebar.tsx)
 interface SubTopic {
   id: string;
   name: string;
@@ -50,46 +48,36 @@ interface Topic {
 }
 
 export default function Dashboard() {
-  // State for subjects from localStorage
   const [subjects, setSubjects] = useState<Topic[]>([]);
   const [subjectProgressData, setSubjectProgressData] = useState<SubjectProgress[]>([]);
   const [showAllSubjects, setShowAllSubjects] = useState(false);
   
-  // Load subjects from localStorage on component mount
   useEffect(() => {
     const savedSubjects = localStorage.getItem('subjects');
     if (savedSubjects) {
       const parsedSubjects = JSON.parse(savedSubjects) as Topic[];
       setSubjects(parsedSubjects);
       
-      // Generate progress data for each subject
-      // Assign a random progress value and color to each subject
       const colors: ColorType[] = ['blue', 'green', 'purple', 'orange'];
       const progressData = parsedSubjects.map((subject, index) => ({
         subject: subject.name,
-        progress: Math.floor(Math.random() * 60) + 20, // Random progress between 20-80%
+        progress: Math.floor(Math.random() * 60) + 20,
         color: colors[index % colors.length],
         estimatedCompletion: `${Math.floor(Math.random() * 10) + 1} weeks`
       }));
       
-      // Sort progress data by progress percentage (descending)
       progressData.sort((a, b) => b.progress - a.progress);
-      
       setSubjectProgressData(progressData);
     }
   }, []);
 
-  // Toggle between showing all subjects or just the top 3
   const toggleShowAllSubjects = () => {
     setShowAllSubjects(!showAllSubjects);
   };
 
-  // Get the subjects to display based on current state
   const displayedSubjects = showAllSubjects
     ? subjectProgressData
     : subjectProgressData.slice(0, 3);
-
-  // Stats data - update subject count based on localStorage data
   const statsData = [
     { type: 'subjects' as StatType, value: subjects.length.toString(), label: 'Active Subjects', color: 'blue' as ColorType },
     { type: 'score' as StatType, value: '85%', label: 'Average Score', color: 'green' as ColorType },
@@ -97,7 +85,6 @@ export default function Dashboard() {
     { type: 'notes' as StatType, value: '24', label: 'Notes Created', color: 'orange' as ColorType }
   ];
 
-  // Recent activity data
   const recentActivityData: ActivityItem[] = [
     {
       id: '1',
@@ -122,7 +109,6 @@ export default function Dashboard() {
     }
   ];
 
-  // Upcoming tests data
   const upcomingTestsData: Test[] = [
     {
       id: '1',

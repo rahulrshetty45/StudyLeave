@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { BookOpen, Clock, FileText, Star } from 'lucide-react';
 
-// Color styles for different cards
 const colorStyles = {
   blue: {
     background: 'var(--highlight-bg)',
@@ -40,7 +39,6 @@ export default function StatsCard({ type, value, label, color }: StatsCardProps)
   const [isHovered, setIsHovered] = useState(false);
   const colorStyle = colorStyles[color];
   
-  // Select the appropriate icon based on the type
   const getIcon = () => {
     switch (type) {
       case 'subjects':

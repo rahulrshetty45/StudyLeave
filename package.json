@@ -11,12 +11,10 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.0.18",
-    "@types/js-cookie": "^3.0.6",
     "dompurify": "^3.2.5",
     "encoding": "^0.1.13",
     "framer-motion": "^10.16.4",
     "html-react-parser": "^5.2.3",
-    "js-cookie": "^3.0.5",
     "lucide-react": "^0.287.0",
     "marked": "^15.0.8",
     "next": "13.5.6",

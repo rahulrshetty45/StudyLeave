@@ -10,7 +10,6 @@ interface SubjectCardProps {
   estimatedCompletion: string;
 }
 
-// Define color variants
 const colorVariants = {
   blue: {
     light: 'var(--highlight-bg)',
@@ -42,7 +41,6 @@ export default function SubjectCard({ subject, progress, color, estimatedComplet
   const [isHovered, setIsHovered] = useState(false);
   const colorScheme = colorVariants[color];
   
-  // Calculate the stroke dash offset for circular progress
   const calculateStrokeDashoffset = (percent: number) => {
     const circumference = 2 * Math.PI * 38; // radius of 38
     return circumference - (circumference * percent) / 100;

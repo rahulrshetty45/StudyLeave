@@ -4,10 +4,8 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import AITutor from './AITutor';
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
-import { Moon, Sun, LogOut, Send } from 'lucide-react';
+import { Moon, Sun, Send } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
-import { useRouter } from 'next/navigation';
-import Cookies from 'js-cookie';
 import '@/styles/darkMode.css';
 
 interface AppLayoutProps {
@@ -17,21 +15,17 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children, activePage = 'dashboard' }: AppLayoutProps) {
   const { theme, toggleTheme } = useTheme();
-  const router = useRouter();
   const isDarkMode = theme === 'dark';
   const [aiTutorWidth, setAiTutorWidth] = useState(320);
   const [aiTutorExpanded, setAiTutorExpanded] = useState(true);
-  // Add state for the global chat input
   const [chatInput, setChatInput] = useState('');
   
-  // Listen for changes to the AI tutor width in localStorage
   useEffect(() => {
     const savedWidth = localStorage.getItem('aiTutorWidth');
     if (savedWidth) {
       setAiTutorWidth(parseInt(savedWidth, 10));
     }
     
-    // Create a storage event listener to update width when it changes
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'aiTutorWidth' && e.newValue) {
         setAiTutorWidth(parseInt(e.newValue, 10));
@@ -40,14 +34,12 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
     
     window.addEventListener('storage', handleStorageChange);
     
-    // Check localStorage periodically for changes
     const interval = setInterval(() => {
       const currentWidth = localStorage.getItem('aiTutorWidth');
       if (currentWidth && parseInt(currentWidth, 10) !== aiTutorWidth) {
         setAiTutorWidth(parseInt(currentWidth, 10));
       }
       
-      // Also check if AI tutor is expanded
       const expanded = localStorage.getItem('aiTutorExpanded');
       if (expanded !== null) {
         setAiTutorExpanded(expanded === 'true');
@@ -58,22 +50,8 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
       window.removeEventListener('storage', handleStorageChange);
       clearInterval(interval);
     };
-  }, [aiTutorWidth]);
+    }, [aiTutorWidth]);
 
-  // Handle logout function
-  const handleLogout = () => {
-    // Clear authentication data
-    localStorage.removeItem('authenticated');
-    localStorage.removeItem('user');
-    
-    // Clear cookies
-    Cookies.remove('authenticated');
-    
-    // Redirect to login page
-    router.push('/login');
-  };
-
-  // Function to send a message to the AI Tutor
   const sendMessageToAITutor = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -81,35 +59,29 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
       return;
     }
     
-    // Get current route for context
     const pathname = window.location.pathname;
     let context = pathname;
     
-    // Extract subject and note from path if available
     const pathParts = pathname.split('/');
     if (pathParts.length >= 3 && pathParts[1] === 'subjects') {
       const subject = pathParts[2] || '';
       const note = pathParts.length >= 4 ? pathParts[3] : '';
       
-      // Format the context string
       context = subject 
         ? (note ? `${subject} - ${note.replace(/-/g, ' ')}` : subject.replace(/-/g, ' '))
         : 'general';
     }
     
-    // Create message payload
     const messageData = {
       message: chatInput,
       context: context,
       timestamp: Date.now()
     };
     
-    // Check if we're on a note page - if so, send to in-page chat instead of AI Tutor
     const isNotePage = pathParts.length >= 4 && pathParts[1] === 'subjects' && pathParts[3];
     
     if (isNotePage) {
       try {
-        // Dispatch event for the in-page chat to handle
         const event = new CustomEvent('inPageMessage', { detail: messageData });
         window.dispatchEvent(event);
         console.log("Sent message to in-page chat:", messageData);
@@ -117,26 +89,21 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
         console.error("Failed to send message to in-page chat:", error);
       }
     } else {
-      // Otherwise send to AI Tutor as before
       try {
-        // Expand the AI Tutor if it's collapsed
         localStorage.setItem('aiTutorExpanded', 'true');
         setAiTutorExpanded(true);
         
-        // Dispatch the event to the AI Tutor
         const event = new CustomEvent('sendMessage', { detail: messageData });
         window.dispatchEvent(event);
         console.log("Sent message to AI Tutor via event:", messageData);
       } catch (error) {
         console.error("Failed to send message via event:", error);
         
-        // Fallback: Store in localStorage for AITutor to pick up
         localStorage.setItem('pendingQuestion', JSON.stringify(messageData));
         console.log("Stored message in localStorage for AI Tutor to pick up");
       }
     }
     
-    // Clear input
     setChatInput('');
   };
 
@@ -149,7 +116,6 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
       position: 'relative',
       overflow: 'hidden'
     }}>
-      {/* Add custom scrollbar styles */}
       <style jsx global>{`
         .main-content {
           scrollbar-width: thin;
@@ -168,7 +134,6 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
           border-radius: 4px;
         }
         
-        /* Animation for the chat input */
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(10px) translateX(-50%); }
           to { opacity: 1; transform: translateY(0) translateX(-50%); }
@@ -266,27 +231,6 @@ export default function AppLayout({ children, activePage = 'dashboard' }: AppLay
               title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
             >
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            
-            {/* Logout Button */}
-            <button
-              onClick={handleLogout}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                backgroundColor: 'var(--input-bg)',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--text-primary)'
-              }}
-              aria-label="Logout"
-              title="Logout"
-            >
-              <LogOut size={18} />
             </button>
             
             <div style={{

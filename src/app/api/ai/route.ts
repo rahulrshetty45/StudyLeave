@@ -1,21 +1,16 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-// Initialize the OpenAI client with better error handling for missing API key
 const openaiApiKey = process.env.OPENAI_API_KEY;
 const modelName = process.env.MODEL_NAME || 'gpt-4o';
 
-// Create a safety check for the API key
 if (!openaiApiKey) {
   console.error('Missing OpenAI API key in environment variables');
 }
 
-// Initialize the OpenAI client
 const openai = new OpenAI({
-  apiKey: openaiApiKey || '',  // Provide empty string as fallback to prevent undefined error
+  apiKey: openaiApiKey || '',
 });
-
-// Helper function to add CORS headers
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
@@ -24,7 +19,6 @@ function corsHeaders() {
   };
 }
 
-// Handle OPTIONS request for CORS preflight
 export async function OPTIONS() {
   return new Response(null, {
     status: 200,
@@ -34,10 +28,8 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
-    // Get messages from request body
     const { messages, stream = false } = await request.json();
 
-    // Log environment variables (excluding sensitive values)
     console.log('Environment check:', { 
       modelNameExists: !!modelName,
       apiKeyExists: !!openaiApiKey,
@@ -59,7 +51,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if this might be a notes generation request by examining the system message
     const isNotesGeneration = messages.some(msg => 
       msg.role === 'system' && 
       msg.content.includes('generate structured notes')
@@ -72,15 +63,12 @@ export async function POST(request: Request) {
       streaming: stream
     });
 
-    // For streaming responses - check if ReadableStream is available
     if (stream && typeof ReadableStream !== 'undefined') {
       const encoder = new TextEncoder();
       
-      // Create a stream with AWS Amplify compatible setup
       const stream = new ReadableStream({
         async start(controller) {
           try {
-            // Create OpenAI streaming completion
             const completion = await openai.chat.completions.create({
               model: modelName,
               messages,
@@ -89,19 +77,14 @@ export async function POST(request: Request) {
               stream: true,
             });
 
-            // Handle each chunk from the API
             for await (const chunk of completion) {
               const content = chunk.choices[0]?.delta?.content || '';
               if (content) {
-                // Format for AWS Amplify compatibility
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-                
-                // Force flush by adding a small delay - helps with AWS infrastructure
                 await new Promise(resolve => setTimeout(resolve, 5));
               }
             }
 
-            // End the stream
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
             controller.close();
           } catch (error) {
@@ -111,8 +94,6 @@ export async function POST(request: Request) {
           }
         },
       });
-
-      // Return the stream response with AWS compatible headers
       return new Response(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
@@ -122,17 +103,16 @@ export async function POST(request: Request) {
           'Transfer-Encoding': 'chunked',
           ...corsHeaders(),
         },
-      });
+              });
     } else {
-      // For non-streaming responses or when ReadableStream is not available
       const reasonMsg = stream ? 'ReadableStream not available' : 'Streaming not requested';
       console.log(`${reasonMsg}, falling back to non-streaming response`);
       
       const response = await openai.chat.completions.create({
         model: modelName,
         messages,
-        temperature: isNotesGeneration ? 0.5 : 0.7, // Lower temperature for more structured output on notes
-        max_tokens: isNotesGeneration ? 2500 : 1000, // Allow more tokens for detailed notes
+        temperature: isNotesGeneration ? 0.5 : 0.7,
+        max_tokens: isNotesGeneration ? 2500 : 1000,
       });
 
       console.log('OpenAI response received:', {
@@ -142,7 +122,6 @@ export async function POST(request: Request) {
         completionTokens: response.usage?.completion_tokens
       });
 
-      // Return response with CORS headers
       return NextResponse.json({
         message: response.choices[0].message.content,
       }, { headers: corsHeaders() });
@@ -150,7 +129,6 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error('Error generating AI response:', error);
     
-    // Detailed error logging for debugging
     console.error('Error details:', {
       name: error?.name,
       message: error?.message,
@@ -159,15 +137,12 @@ export async function POST(request: Request) {
       type: error?.type,
     });
     
-    // Check for specific OpenAI errors
     if (error?.message?.includes('API key')) {
       return NextResponse.json(
         { error: 'Authentication error with OpenAI API' },
         { status: 401, headers: corsHeaders() }
       );
     }
-    
-    // Return more detailed error for debugging
     return NextResponse.json(
       { 
         error: 'Error generating AI response', 
